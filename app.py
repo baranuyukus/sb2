@@ -84,8 +84,13 @@ def index():
 @app.route("/api/status")
 def api_status():
     status = engine.get_status()
+    tunnel_status = tunnel_manager.get_tunnel_status()
     status["profile"] = ARGS.profile
-    status["tunnel_url"] = tunnel_manager.get_tunnel_url()
+    status["tunnel_url"] = tunnel_status["url"]
+    status["tunnel_status"] = tunnel_status["status"]
+    status["tunnel_error"] = tunnel_status["error"]
+    status["tunnel_running"] = tunnel_status["running"]
+    status["tunnel_logs"] = tunnel_status["logs"]
     status["local_url"] = f"http://127.0.0.1:{ARGS.port}"
     return jsonify(status)
 
@@ -233,6 +238,20 @@ def api_start_bot():
 def api_stop_bot():
     engine.stop_bot()
     return jsonify({"success": True})
+
+
+@app.route("/api/tunnel/start", methods=["POST"])
+def api_start_tunnel():
+    data = request.get_json(silent=True) or {}
+    force = data.get("force", True)
+    success = tunnel_manager.start_tunnel(ARGS.port, force=force)
+    return jsonify({"success": success, **tunnel_manager.get_tunnel_status()})
+
+
+@app.route("/api/tunnel/stop", methods=["POST"])
+def api_stop_tunnel():
+    success = tunnel_manager.stop_tunnel()
+    return jsonify({"success": success, **tunnel_manager.get_tunnel_status()})
 
 
 @app.route("/api/settings", methods=["GET"])

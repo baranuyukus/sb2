@@ -66,10 +66,19 @@ body {
 .tunnel-banner {
     display: flex; align-items: center; justify-content: space-between;
     background: #1e293b; color: #fff; padding: 8px 24px;
-    font-size: 13px; font-weight: 500;
+    font-size: 13px; font-weight: 500; gap: 16px;
 }
-.tunnel-url { color: #60a5fa; text-decoration: underline; cursor: pointer; }
+.tunnel-banner-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tunnel-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tunnel-url { color: #60a5fa; text-decoration: underline; cursor: pointer; overflow-wrap: anywhere; }
 .profile-badge { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+.tunnel-state-pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: rgba(255,255,255,0.16); }
+.tunnel-state-pill.running { background: rgba(16,185,129,0.2); color: #a7f3d0; }
+.tunnel-state-pill.starting { background: rgba(245,158,11,0.2); color: #fde68a; }
+.tunnel-state-pill.error { background: rgba(239,68,68,0.2); color: #fecaca; }
+.tunnel-state-pill.stopped { background: rgba(148,163,184,0.22); color: #e2e8f0; }
+.tunnel-error { color: #fecaca; font-size: 12px; min-height: 16px; }
+.tunnel-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* ─── SIDEBAR ───────────────────────────────────────────────── */
 .sidebar {
@@ -346,7 +355,8 @@ body {
     .settings-grid { grid-template-columns: 1fr; }
     .bot-bar { left: 0; padding: 12px 16px; flex-wrap: wrap; height: auto; gap: 12px; flex-direction: column; align-items: stretch; }
     .bot-bar-left, .bot-bar-right { justify-content: space-between; }
-    .tunnel-banner { flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 16px; }
+    .tunnel-banner { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px 16px; }
+    .tunnel-actions { width: 100%; }
     
     /* MOBILE CARD TABLE RE-IMPLEMENTATION (COMPACT HORIZONTAL LIST) */
     .product-table thead { display: none; }

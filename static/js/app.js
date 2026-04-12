@@ -102,12 +102,7 @@ function updateStatusUI(d) {
     
     // Tunnel & Profile mapping
     if (d.profile) { el('profile-badge').textContent = d.profile.toUpperCase(); }
-    if (d.tunnel_url) {
-        el('tunnel-banner').style.display = 'flex';
-        const turl = el('tunnel-url');
-        turl.href = d.tunnel_url;
-        turl.textContent = d.tunnel_url;
-    }
+    updateTunnelUI(d);
 
     el('stat-lastcheck').textContent = d.last_check || '—';
 
@@ -138,6 +133,94 @@ function updateStatusUI(d) {
     }
 
     if (d.total_products > 0 && products.length === 0) loadProducts();
+}
+
+function updateTunnelUI(d) {
+    const localUrl = d.local_url || 'http://127.0.0.1:5050';
+    const tunnelUrl = d.tunnel_url || '';
+    const tunnelStatus = d.tunnel_status || 'idle';
+    const tunnelError = d.tunnel_error || '';
+
+    const localLink = el('local-url');
+    localLink.href = localUrl;
+    localLink.textContent = localUrl;
+
+    const tunnelLink = el('tunnel-url');
+    tunnelLink.href = tunnelUrl || '#';
+    tunnelLink.textContent = tunnelUrl || 'Hazırlanıyor...';
+
+    const statePill = el('tunnel-state-pill');
+    statePill.className = `tunnel-state-pill ${tunnelStatus}`;
+
+    if (tunnelStatus === 'running' && tunnelUrl) {
+        statePill.textContent = 'Tunnel aktif';
+    } else if (tunnelStatus === 'starting') {
+        statePill.textContent = 'Tunnel başlatılıyor';
+    } else if (tunnelStatus === 'error') {
+        statePill.textContent = 'Tunnel hatası';
+    } else if (tunnelStatus === 'stopped') {
+        statePill.textContent = 'Tunnel kapalı';
+    } else {
+        statePill.textContent = 'Tunnel bekleniyor';
+    }
+
+    const errorBox = el('tunnel-error');
+    if (tunnelStatus === 'error' && tunnelError) {
+        errorBox.textContent = tunnelError;
+    } else {
+        errorBox.textContent = '';
+    }
+
+    const copyBtn = el('btn-copy-tunnel');
+    copyBtn.disabled = !tunnelUrl;
+
+    const startBtn = el('btn-start-tunnel');
+    const stopBtn = el('btn-stop-tunnel');
+
+    if (tunnelStatus === 'running' || tunnelStatus === 'starting') {
+        startBtn.style.display = 'none';
+        stopBtn.style.display = '';
+    } else {
+        startBtn.style.display = '';
+        startBtn.textContent = tunnelStatus === 'error' ? 'Tekrar Dene' : 'Başlat';
+        stopBtn.style.display = 'none';
+    }
+}
+
+async function startTunnel() {
+    const btn = el('btn-start-tunnel');
+    btn.disabled = true;
+    const response = await api('/api/tunnel/start', 'POST', { force: true });
+    btn.disabled = false;
+    if (response.success) {
+        toast('🌐 Tunnel başlatılıyor...', 'info');
+    } else {
+        toast('❌ Tunnel başlatılamadı', 'error');
+    }
+    loadStatus();
+}
+
+async function stopTunnel() {
+    const btn = el('btn-stop-tunnel');
+    btn.disabled = true;
+    const response = await api('/api/tunnel/stop', 'POST');
+    btn.disabled = false;
+    if (response.success) {
+        toast('⛔ Tunnel durduruldu', 'info');
+    } else {
+        toast('❌ Tunnel durdurulamadı', 'error');
+    }
+    loadStatus();
+}
+
+function copyTunnelUrl() {
+    const tunnelUrl = el('tunnel-url').href;
+    if (!tunnelUrl || tunnelUrl.endsWith('#')) {
+        toast('⚠️ Henüz kopyalanacak tunnel linki yok', 'error');
+        return;
+    }
+    navigator.clipboard.writeText(tunnelUrl);
+    toast('✅ Link kopyalandı!', 'success');
 }
 
 async function loadStatus() {

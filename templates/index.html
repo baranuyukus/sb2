@@ -42,13 +42,27 @@
 
 <!-- ─── MAIN ───────────────────────────────────────────── -->
 <div class="main">
-    <div class="tunnel-banner" id="tunnel-banner" style="display:none">
-        <div style="display:flex; align-items:center; gap:8px;">
-            <span class="profile-badge" id="profile-badge">DEFAULT</span>
-            <span>Cloudflare Tunnel Aktif:</span> 
-            <a href="#" target="_blank" class="tunnel-url" id="tunnel-url">🔗 Bağlantı Bekleniyor...</a>
+    <div class="tunnel-banner" id="tunnel-banner">
+        <div class="tunnel-banner-main">
+            <div class="tunnel-row">
+                <span class="profile-badge" id="profile-badge">DEFAULT</span>
+                <span class="tunnel-state-pill" id="tunnel-state-pill">Tunnel bekleniyor</span>
+            </div>
+            <div class="tunnel-row">
+                <span>Yerel Panel:</span>
+                <a href="#" target="_blank" class="tunnel-url" id="local-url">http://127.0.0.1:5050</a>
+            </div>
+            <div class="tunnel-row">
+                <span>Global Link:</span>
+                <a href="#" target="_blank" class="tunnel-url" id="tunnel-url">Hazırlanıyor...</a>
+            </div>
+            <div class="tunnel-error" id="tunnel-error"></div>
         </div>
-        <button class="btn btn-sm" onclick="navigator.clipboard.writeText(el('tunnel-url').href); toast('✅ Link kopyalandı!', 'success')">Kopyala</button>
+        <div class="tunnel-actions">
+            <button class="btn btn-sm" id="btn-copy-tunnel" onclick="copyTunnelUrl()">Kopyala</button>
+            <button class="btn btn-sm" id="btn-start-tunnel" onclick="startTunnel()">Başlat</button>
+            <button class="btn btn-sm btn-danger" id="btn-stop-tunnel" onclick="stopTunnel()">Durdur</button>
+        </div>
     </div>
     
     <header class="header">
