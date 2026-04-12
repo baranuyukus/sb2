@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SneakerBaker Bot Dashboard</title>
+    <meta name="description" content="SneakerBaker otomatik fiyat kırma ve yönetim paneli">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👟</text></svg>">
+</head>
+<body>
+
+<!-- ─── AMBIENT BACKGROUND GLOW ─────────────────────────── -->
+<div class="ambient-glow ambient-glow-1"></div>
+<div class="ambient-glow ambient-glow-2"></div>
+<div class="ambient-glow ambient-glow-3"></div>
+
+<!-- ─── SIDEBAR ─────────────────────────────────────────── -->
+<div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+        <div class="logo-icon">👟</div>
+        <div class="logo-text">Sneaker<span>Baker</span></div>
+    </div>
+    <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="dashboard" id="nav-dashboard">
+            <span class="nav-icon">📊</span> Dashboard
+        </button>
+        <button class="nav-item" data-view="settings" id="nav-settings">
+            <span class="nav-icon">⚙️</span> Ayarlar
+        </button>
+        <button class="nav-item" id="btn-toggle-logs">
+            <span class="nav-icon">📋</span> Loglar
+        </button>
+    </nav>
+    <div class="sidebar-footer">
+        <button class="btn btn-primary" style="width:100%" id="btn-login" onclick="handleLogin()">
+            🌐 Giriş Yap
+        </button>
+    </div>
+</aside>
+
+<!-- ─── MAIN ───────────────────────────────────────────── -->
+<div class="main">
+    <div class="tunnel-banner" id="tunnel-banner" style="display:none">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span class="profile-badge" id="profile-badge">DEFAULT</span>
+            <span>Cloudflare Tunnel Aktif:</span> 
+            <a href="#" target="_blank" class="tunnel-url" id="tunnel-url">🔗 Bağlantı Bekleniyor...</a>
+        </div>
+        <button class="btn btn-sm" onclick="navigator.clipboard.writeText(el('tunnel-url').href); toast('✅ Link kopyalandı!', 'success')">Kopyala</button>
+    </div>
+    
+    <header class="header">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <button class="btn-icon btn-ghost hamburger-btn" id="btn-hamburger" onclick="toggleSidebar()">☰</button>
+            <h1 class="header-title" id="page-title">Dashboard</h1>
+        </div>
+        <div class="header-actions">
+            <div class="refresh-indicator" id="refresh-indicator">🔄 Veriler güncellendi</div>
+            <button class="btn btn-sm" onclick="refreshProducts()" id="btn-refresh">🔄 Yenile</button>
+        </div>
+    </header>
+
+    <!-- ─── DASHBOARD ──────────────────────────────────── -->
+    <div class="content" id="view-dashboard">
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Toplam Ürün</div>
+                <div class="stat-value" id="stat-total">0</div>
+                <div class="stat-icon">📦</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Auto Açık</div>
+                <div class="stat-value" id="stat-auto">0</div>
+                <div class="stat-icon">🤖</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Fiyat Kırma</div>
+                <div class="stat-value" id="stat-undercut">0</div>
+                <div class="stat-icon">⬇️</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Son Kontrol</div>
+                <div class="stat-value" id="stat-lastcheck" style="font-size:18px">—</div>
+                <div class="stat-icon">🕐</div>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="search-input" placeholder="Ürün ara (isim, beden, id)..." oninput="handleSearch()">
+            </div>
+            <div class="filter-tabs" id="filter-tabs">
+                <button class="filter-tab active" data-filter="all" onclick="setFilter('all', this)">Tümü <span class="filter-count" id="fc-all">0</span></button>
+                <button class="filter-tab" data-filter="undercut" onclick="setFilter('undercut', this)">Kırma <span class="filter-count" id="fc-undercut">0</span></button>
+                <button class="filter-tab" data-filter="cheapest" onclick="setFilter('cheapest', this)">En Ucuz <span class="filter-count" id="fc-cheapest">0</span></button>
+                <button class="filter-tab" data-filter="auto" onclick="setFilter('auto', this)">Auto <span class="filter-count" id="fc-auto">0</span></button>
+            </div>
+            
+            <div style="display:flex; align-items:center; gap: 8px; flex-wrap:wrap; width: 100%;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; font-weight:600; padding:6px 12px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius-sm);">
+                    <input type="checkbox" id="select-all-mobile" onchange="toggleSelectAll(this)"> Tümünü Seç
+                </label>
+                <button class="btn btn-sm btn-success" onclick="bulkAutoEnable()">✅ Auto Aç</button>
+                <button class="btn btn-sm btn-danger" onclick="bulkAutoDisable()">❌ Auto Kapat</button>
+                <span class="toolbar-info" id="toolbar-info"></span>
+            </div>
+        </div>
+
+        <!-- Table -->
+        <div class="table-container">
+            <div class="table-scroll">
+                <table class="product-table" id="product-table">
+                    <thead>
+                        <tr>
+                            <th class="col-check"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
+                            <th class="col-img"></th>
+                            <th class="col-name">Ürün</th>
+                            <th class="col-size">Beden</th>
+                            <th class="col-price">Fiyatın</th>
+                            <th class="col-price">Maliyet</th>
+                            <th class="col-price">En Ucuz</th>
+                            <th class="col-auto">Auto</th>
+                            <th class="col-min">Min Fiyat</th>
+                            <th class="col-action"></th>
+                            <th class="col-status">Durum</th>
+                        </tr>
+                    </thead>
+                    <tbody id="product-tbody">
+                        <tr><td colspan="11">
+                            <div class="empty-state">
+                                <div class="empty-icon">👟</div>
+                                <h3>Henüz ürün yok</h3>
+                                <p>Soldaki "Giriş Yap" butonuna tıklayın, ardından "Yenile" butonuna basın.</p>
+                            </div>
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div class="pagination" id="pagination"></div>
+        </div>
+    </div>
+
+    <!-- ─── SETTINGS ───────────────────────────────────── -->
+    <div class="content" id="view-settings" style="display:none">
+        <div class="settings-grid">
+            <div class="setting-card">
+                <label>Undercut Miktarı (₺)</label>
+                <input type="number" id="setting-undercut" value="1" min="1">
+                <p style="margin-top:6px;font-size:10px;color:var(--text-muted)">Rakipten kaç TL düşük</p>
+            </div>
+            <div class="setting-card">
+                <label>Min Kâr Marjı (₺)</label>
+                <input type="number" id="setting-profit" value="500" min="0">
+                <p style="margin-top:6px;font-size:10px;color:var(--text-muted)">Maliyet üzeri minimum kâr</p>
+            </div>
+            <div class="setting-card">
+                <label>Bot Aralığı (saniye)</label>
+                <input type="number" id="setting-interval" value="300" min="30">
+                <p style="margin-top:6px;font-size:10px;color:var(--text-muted)">Otomatik kontrol sıklığı</p>
+            </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Ayarları Kaydet</button>
+    </div>
+</div>
+
+<!-- ─── BOT BAR ─────────────────────────────────────────── -->
+<div class="bot-bar">
+    <div class="bot-bar-left">
+        <div class="bot-status-dot" id="bot-dot"></div>
+        <span style="font-size:12px;font-weight:600" id="bot-status-text">Bot Durmuş</span>
+    </div>
+    <div class="bot-bar-right">
+        <span style="font-size:11px;color:var(--text-muted)">Aralık:</span>
+        <select class="interval-select" id="interval-select">
+            <option value="60">1 dk</option>
+            <option value="120">2 dk</option>
+            <option value="180">3 dk</option>
+            <option value="300" selected>5 dk</option>
+            <option value="600">10 dk</option>
+        </select>
+        <button class="btn btn-success btn-sm" id="btn-start-bot" onclick="startBot()">▶ Başlat</button>
+        <button class="btn btn-danger btn-sm" id="btn-stop-bot" onclick="stopBot()" style="display:none">⏹ Durdur</button>
+    </div>
+</div>
+
+<!-- ─── LOGS ────────────────────────────────────────────── -->
+<div class="logs-panel" id="logs-panel">
+    <div class="logs-header">
+        <span>📋 Loglar</span>
+        <button class="btn btn-sm btn-icon btn-ghost" onclick="toggleLogs()">✕</button>
+    </div>
+    <div class="logs-body" id="logs-body"></div>
+</div>
+
+<!-- ─── PRICE MODAL ─────────────────────────────────────── -->
+<div class="modal-overlay" id="price-modal">
+    <div class="modal">
+        <div class="modal-title">💰 Fiyat ve Limit Düzenle</div>
+        <p style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px" id="modal-product-name"></p>
+        
+        <div style="background:var(--bg-base); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
+                <span style="color:var(--text-dim)">Beden:</span>
+                <strong id="modal-info-size"></strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
+                <span style="color:var(--text-dim)">Mevcut Fiyatınız:</span>
+                <strong id="modal-info-current"></strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
+                <span style="color:var(--text-dim)">Maliyet:</span>
+                <strong id="modal-info-cost"></strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px;">
+                <span style="color:var(--text-dim)">Platformdaki En Ucuz:</span>
+                <strong id="modal-info-cheapest" style="color:var(--accent)"></strong>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Anlık Satış Fiyatını Değiştir (₺)</label>
+            <input type="number" class="modal-input" id="modal-price-input" placeholder="Örn: 14500" min="1000" style="margin-bottom:8px">
+            <div class="modal-hint" id="modal-hints" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Dip Fiyat Limiti (Auto için) (₺)</label>
+            <input type="number" class="modal-input" id="modal-min-price-input" placeholder="Örn: 13500 (Opsiyonel)" min="0" style="margin-bottom:0">
+            <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Bot, rekabet ederken bu fiyattan aşağıya inmez.</p>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeModal()">İptal</button>
+            <button class="btn btn-primary" id="btn-confirm-price" onclick="confirmPriceUpdate()">✓ Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── LOGIN MODAL ─────────────────────────────────────── -->
+<div class="modal-overlay" id="login-modal">
+    <div class="modal">
+        <div class="modal-title">🌐 SneakerBaker Giriş</div>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px" id="login-status-text">
+            Botun SneakerBaker'a giriş yapabilmesi için bilgilerinizi girin.
+        </p>
+        
+        <input type="email" class="modal-input" id="login-email" placeholder="Email Adresi" style="font-size:14px; text-align:left; letter-spacing:0; margin-bottom:8px">
+        <input type="password" class="modal-input" id="login-password" placeholder="Şifre" style="font-size:14px; text-align:left; letter-spacing:0;">
+        
+        <div style="background:var(--bg-input);border-radius:var(--radius-sm);padding:10px;margin:12px 0;font-size:10px;color:var(--text-muted);line-height:1.6;text-align:center;">
+            ÖNEMLİ: Bilgileriniz ve oturum çerezleri yalnızca bu cihazda, yerel uygulama verisi olarak saklanır. Bot bunları SneakerBaker'a giriş yapıp fiyata müdahale edebilmek için kullanır.
+        </div>
+        
+        <div class="modal-actions" style="justify-content: space-between;">
+            <button class="btn btn-ghost" onclick="closeLoginModal()">İptal</button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-ghost" id="btn-open-chrome" onclick="openChrome()" title="Tarayıcıyı açıp elle girmek için">🛠️ Elle Giriş</button>
+                <button class="btn btn-success" id="btn-confirm-login" onclick="confirmLogin()" style="display:none">✓ Giriş Tamamlandı</button>
+                <button class="btn btn-primary" id="btn-auto-login" onclick="autoLogin()">🚀 Otomatik Giriş</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
