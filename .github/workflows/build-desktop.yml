@@ -7,6 +7,10 @@ on:
       - main
       - master
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   build:
     strategy:
@@ -56,3 +60,57 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.archive_path }}
+
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download build artifacts from current run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --dir release-artifacts
+
+      - name: Prepare release notes
+        run: |
+          cat <<EOF > release-notes.md
+          Automated desktop build for commit \`${{ github.sha }}\`.
+
+          Included assets:
+          - macOS build
+          - Windows build
+
+          These files are published as GitHub Release assets so they can be downloaded directly from the Releases page.
+          EOF
+
+      - name: Publish latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view latest --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release delete latest \
+              --repo "${{ github.repository }}" \
+              --cleanup-tag \
+              --yes
+          fi
+
+          mapfile -t assets < <(find release-artifacts -type f -name '*.zip' | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets found."
+            exit 1
+          fi
+
+          gh release create latest \
+            "${assets[@]}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Latest Desktop Build" \
+            --notes-file release-notes.md \
+            --latest
