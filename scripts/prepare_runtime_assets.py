@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import shutil
+import stat
 import tarfile
 import tempfile
 import urllib.request
@@ -23,7 +24,35 @@ def download_file(url, destination):
 
 def extract_zip(zip_path, output_dir):
     with zipfile.ZipFile(zip_path) as archive:
-        archive.extractall(output_dir)
+        for entry in archive.infolist():
+            archive.extract(entry, output_dir)
+            extracted_path = os.path.join(output_dir, entry.filename)
+            mode = entry.external_attr >> 16
+            if mode:
+                os.chmod(extracted_path, mode)
+
+
+def mark_macos_bundle_executables(root_dir):
+    macho_magics = {
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",
+    }
+
+    for current_root, _, files in os.walk(root_dir):
+        for filename in files:
+            path = os.path.join(current_root, filename)
+            try:
+                with open(path, "rb") as handle:
+                    if handle.read(4) not in macho_magics:
+                        continue
+                current_mode = stat.S_IMODE(os.stat(path).st_mode)
+                os.chmod(path, current_mode | 0o111)
+            except OSError:
+                continue
 
 
 def extract_tgz(tgz_path, output_dir):
@@ -118,6 +147,10 @@ def ensure_chrome_bundle(vendor_dir, targets):
 
         extract_zip(chrome_zip, chrome_root)
         extract_zip(driver_zip, driver_root)
+
+    if platform.system().lower() == "darwin":
+        mark_macos_bundle_executables(chrome_root)
+        mark_macos_bundle_executables(driver_root)
 
 
 def main():

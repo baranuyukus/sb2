@@ -13,6 +13,7 @@ import re
 import json
 import os
 import platform
+import tempfile
 import threading
 from datetime import datetime
 
@@ -158,12 +159,17 @@ class BotEngine:
                     pass
 
             chrome_options = Options()
+            profile_root = ensure_app_subdir("chrome-profile", self.profile)
+            profile_dir = tempfile.mkdtemp(prefix="session-", dir=profile_root)
             chrome_options.add_argument("--start-maximized")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--no-first-run")
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option("useAutomationExtension", False)
             chrome_options.add_argument("--no-default-browser-check")
             chrome_options.add_argument("--disable-search-engine-choice-screen")
+            chrome_options.add_argument(f"--user-data-dir={profile_dir}")
 
             self.driver = create_webdriver(chrome_options)
             self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
