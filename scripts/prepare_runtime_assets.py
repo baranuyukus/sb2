@@ -135,18 +135,16 @@ def ensure_chrome_bundle(vendor_dir, targets):
     os.makedirs(chrome_root, exist_ok=True)
     os.makedirs(driver_root, exist_ok=True)
 
-    if os.listdir(chrome_root) and os.listdir(driver_root):
-        return
+    if not (os.listdir(chrome_root) and os.listdir(driver_root)):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            chrome_zip = os.path.join(tmp_dir, "chrome.zip")
+            driver_zip = os.path.join(tmp_dir, "chromedriver.zip")
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        chrome_zip = os.path.join(tmp_dir, "chrome.zip")
-        driver_zip = os.path.join(tmp_dir, "chromedriver.zip")
+            download_file(chrome_url, chrome_zip)
+            download_file(driver_url, driver_zip)
 
-        download_file(chrome_url, chrome_zip)
-        download_file(driver_url, driver_zip)
-
-        extract_zip(chrome_zip, chrome_root)
-        extract_zip(driver_zip, driver_root)
+            extract_zip(chrome_zip, chrome_root)
+            extract_zip(driver_zip, driver_root)
 
     if platform.system().lower() == "darwin":
         mark_macos_bundle_executables(chrome_root)
