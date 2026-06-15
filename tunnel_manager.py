@@ -8,7 +8,7 @@ import threading
 import urllib.request
 from datetime import datetime
 
-from runtime_env import app_data_dir, app_data_path, ensure_app_subdir, resource_path
+from runtime_env import app_data_path, ensure_app_subdir, ensure_profile_subdir, profile_dir, resource_path
 
 
 _UNSET = object()
@@ -133,7 +133,7 @@ def ensure_cloudflared_binary():
 
 
 def _cloudflared_env():
-    home_dir = ensure_app_subdir("cloudflared-home")
+    home_dir = ensure_profile_subdir("cloudflared-home")
     cloudflared_config_dir = os.path.join(home_dir, ".cloudflared")
     os.makedirs(cloudflared_config_dir, exist_ok=True)
 
@@ -250,7 +250,7 @@ def start_tunnel(port, force=False):
             text=True,
             bufsize=1,
             creationflags=creationflags,
-            cwd=app_data_dir(),
+            cwd=profile_dir(),
             env=_cloudflared_env(),
         )
     except Exception as exc:

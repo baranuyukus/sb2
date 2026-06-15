@@ -40,9 +40,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { closeModal(); closeLoginModal(); }
+        if (e.key === 'Escape') { closeModal(); closeBulkMinPriceModal(); closeLoginModal(); }
         if (e.key === 'Enter' && el('price-modal').classList.contains('active')) {
             confirmPriceUpdate();
+        }
+        if (e.key === 'Enter' && el('bulk-min-modal').classList.contains('active')) {
+            confirmBulkMinPrice();
         }
     });
 });
@@ -101,7 +104,9 @@ function updateStatusUI(d) {
     animateNumber('stat-undercut', d.needs_undercut_count || 0);
     
     // Tunnel & Profile mapping
-    if (d.profile) { el('profile-badge').textContent = d.profile.toUpperCase(); }
+    if (d.profile_name || d.profile) {
+        el('profile-badge').textContent = (d.profile_name || d.profile).toUpperCase();
+    }
     updateTunnelUI(d);
 
     el('stat-lastcheck').textContent = d.last_check || '—';
@@ -272,6 +277,7 @@ async function silentRefreshProducts() {
                 if (checked.has(cb.value)) cb.checked = true;
             });
         }
+        syncSelectAllState();
 
         // Show subtle indicator
         showRefreshIndicator();
@@ -375,6 +381,7 @@ function renderProducts() {
                 <h3>${products.length === 0 ? 'Henüz ürün yok' : 'Sonuç bulunamadı'}</h3>
                 <p>${products.length === 0 ? 'Giriş yapın ve ürünleri yenileyin.' : 'Filtreyi veya aramayı değiştirin.'}</p>
             </div></td></tr>`;
+        syncSelectAllState();
         return;
     }
 
@@ -392,8 +399,8 @@ function renderProducts() {
             : '<div class="product-thumb thumb-fallback">👟</div>';
 
         return `
-        <tr data-id="${p.id}" class="${isUnder ? 'row-undercut' : ''}">
-            <td data-label="Seç"><input type="checkbox" class="product-checkbox" value="${p.id}"></td>
+        <tr data-id="${p.id}" class="${isUnder ? 'row-undercut' : ''}" onclick="handleProductRowClick(event, '${p.id}')">
+            <td data-label="Seç"><input type="checkbox" class="product-checkbox" value="${p.id}" onchange="syncSelectAllState()"></td>
             <td data-label="Görsel">${img}</td>
             <td data-label="Ürün"><div class="product-name" title="${p.title}">${p.title}</div></td>
             <td data-label="Beden"><span class="product-size">${p.size}</span></td>
@@ -420,6 +427,8 @@ function renderProducts() {
             <td data-label="Durum">${badge}</td>
         </tr>`;
     }).join('');
+
+    syncSelectAllState();
 }
 
 // ─── PAGINATION ─────────────────────────────────────────────────
@@ -501,6 +510,7 @@ function openPriceModal(productId) {
     // Populate inputs
     el('modal-price-input').value = p.current_price;
     el('modal-min-price-input').value = p.auto_min_price || '';
+    el('modal-floor-hint').textContent = `Maliyet + min kâr tabanı: ${formatPrice(p.cost_price + (parseInt(el('setting-profit').value || '0', 10) || 0))}`;
 
     // Hint buttons for current price
     const hints = [];
@@ -517,8 +527,30 @@ function openPriceModal(productId) {
         `<button class="btn btn-sm btn-ghost" style="font-size:10px; border:1px solid var(--border)" onclick="el('modal-price-input').value=${h.value}">${h.label}</button>`
     ).join('');
 
+    renderMinPriceActions(p);
+
     el('price-modal').classList.add('active');
     setTimeout(() => { el('modal-price-input').focus(); el('modal-price-input').select(); }, 200);
+}
+
+function renderMinPriceActions(product) {
+    const floor = product.cost_price + (parseInt(el('setting-profit').value || '0', 10) || 0);
+    const minActions = [
+        { label: 'En Ucuz', value: product.min_price || 0 },
+        { label: 'En Ucuz - 1', value: Math.max((product.min_price || 0) - 1, 0) },
+        { label: 'En Ucuz - 10', value: Math.max((product.min_price || 0) - 10, 0) },
+        { label: 'Maliyet + Kâr', value: floor },
+        { label: 'Temizle', value: 0 },
+    ];
+
+    el('modal-min-quick-actions').innerHTML = minActions.map(action =>
+        `<button class="quick-action-chip" onclick="setNumericInputValue('modal-min-price-input', ${action.value})">${action.label}</button>`
+    ).join('');
+
+    el('modal-min-step-actions').innerHTML = [-100, -10, 10, 100].map(step => {
+        const label = step > 0 ? `+${step}` : String(step);
+        return `<button class="step-action-chip" onclick="adjustNumericInput('modal-min-price-input', ${step})">${label}</button>`;
+    }).join('');
 }
 
 function closeModal() {
@@ -587,8 +619,27 @@ function getSelectedIds() {
     return Array.from(document.querySelectorAll('.product-checkbox:checked')).map(c => c.value);
 }
 
+function syncSelectAllState() {
+    const boxes = Array.from(document.querySelectorAll('.product-checkbox'));
+    const allChecked = boxes.length > 0 && boxes.every(cb => cb.checked);
+    const someChecked = boxes.some(cb => cb.checked);
+
+    ['select-all', 'select-all-mobile'].forEach(id => {
+        const checkbox = el(id);
+        if (!checkbox) return;
+        checkbox.checked = allChecked;
+        checkbox.indeterminate = !allChecked && someChecked;
+    });
+}
+
 function toggleSelectAll(cb) {
     document.querySelectorAll('.product-checkbox').forEach(c => c.checked = cb.checked);
+    syncSelectAllState();
+}
+
+function handleProductRowClick(event, productId) {
+    if (isInteractiveElement(event.target)) return;
+    openPriceModal(productId);
 }
 
 async function bulkAutoEnable() {
@@ -607,6 +658,77 @@ async function bulkAutoDisable() {
     ids.forEach(id => { const p = products.find(x => x.id === id); if (p) p.auto_enabled = false; });
     renderAll(); loadStatus();
     toast(`🔴 ${ids.length} üründe auto kapatıldı`, 'info');
+}
+
+function openBulkMinPriceModal() {
+    const ids = getSelectedIds();
+    if (!ids.length) {
+        toast('⚠️ Önce ürün seçin', 'error');
+        return;
+    }
+
+    el('bulk-min-selection-text').textContent = `${ids.length} seçili ürüne aynı alt limit uygulanacak.`;
+    el('bulk-min-price-input').value = '';
+    renderBulkMinQuickActions();
+    el('bulk-min-modal').classList.add('active');
+    setTimeout(() => {
+        el('bulk-min-price-input').focus();
+        el('bulk-min-price-input').select();
+    }, 120);
+}
+
+function closeBulkMinPriceModal() {
+    el('bulk-min-modal').classList.remove('active');
+}
+
+function renderBulkMinQuickActions() {
+    const firstSelected = products.find(product => getSelectedIds().includes(product.id));
+    const floor = firstSelected ? firstSelected.cost_price + (parseInt(el('setting-profit').value || '0', 10) || 0) : 0;
+    const quickActions = [
+        { label: 'Temizle', value: 0 },
+        { label: 'İlk Ürün Maliyet + Kâr', value: floor },
+    ];
+
+    el('bulk-min-quick-actions').innerHTML = quickActions.map(action =>
+        `<button class="quick-action-chip" onclick="setNumericInputValue('bulk-min-price-input', ${action.value})">${action.label}</button>`
+    ).join('');
+
+    el('bulk-min-step-actions').innerHTML = [-100, -10, 10, 100].map(step => {
+        const label = step > 0 ? `+${step}` : String(step);
+        return `<button class="step-action-chip" onclick="adjustNumericInput('bulk-min-price-input', ${step})">${label}</button>`;
+    }).join('');
+}
+
+async function confirmBulkMinPrice() {
+    const ids = getSelectedIds();
+    if (!ids.length) {
+        closeBulkMinPriceModal();
+        toast('⚠️ Seçili ürün kalmadı', 'error');
+        return;
+    }
+
+    const minPrice = parseInt(el('bulk-min-price-input').value || '0', 10) || 0;
+    const btn = el('btn-confirm-bulk-min');
+    btn.classList.add('loading');
+    btn.disabled = true;
+
+    const response = await api('/api/products/bulk-min-price', 'POST', { ids, min_price: minPrice });
+
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    closeBulkMinPriceModal();
+
+    if (!response.success) {
+        toast('❌ Toplu min fiyat uygulanamadı', 'error');
+        return;
+    }
+
+    ids.forEach(id => {
+        const product = products.find(item => item.id === id);
+        if (product) product.auto_min_price = minPrice;
+    });
+    renderAll();
+    toast(`✅ ${ids.length} ürün için min fiyat güncellendi`, 'success');
 }
 
 // ─── LOGIN ──────────────────────────────────────────────────────
@@ -763,4 +885,24 @@ function toast(msg, type = 'info') {
 }
 
 // ─── UTIL ───────────────────────────────────────────────────────
+function isInteractiveElement(node) {
+    return Boolean(node.closest('button, input, label, a, select, textarea'));
+}
+
+function setNumericInputValue(inputId, value) {
+    const input = el(inputId);
+    if (!input) return;
+    input.value = value || 0;
+    input.focus();
+    input.select();
+}
+
+function adjustNumericInput(inputId, delta) {
+    const input = el(inputId);
+    if (!input) return;
+    const current = parseInt(input.value || '0', 10) || 0;
+    input.value = Math.max(current + delta, 0);
+    input.focus();
+}
+
 function el(id) { return document.getElementById(id); }

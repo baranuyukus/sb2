@@ -323,6 +323,32 @@ body {
 .modal-input { width: 100%; padding: 12px 16px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: var(--font); font-size: 16px; margin-bottom: 16px; transition: all 0.2s; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); }
 .modal-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.modal-helper-text { font-size: 11px; color: var(--text-faint); margin-top: 6px; line-height: 1.5; }
+.quick-action-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.quick-action-chip {
+    border: 1px solid var(--border);
+    background: var(--bg-base);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.quick-action-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.step-action-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.step-action-chip {
+    min-width: 62px;
+    border: 1px dashed var(--border-hover);
+    background: #fff;
+    color: var(--text-dim);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.step-action-chip:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ─── SETTINGS ──────────────────────────────────────────────── */
 .settings-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 24px; }
@@ -357,6 +383,30 @@ body {
     .bot-bar-left, .bot-bar-right { justify-content: space-between; }
     .tunnel-banner { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px 16px; }
     .tunnel-actions { width: 100%; }
+    .header { padding: 0 16px; }
+    .header-actions { gap: 8px; }
+    .toolbar { gap: 10px; }
+    .filter-tabs { width: 100%; overflow-x: auto; }
+    .modal-overlay { align-items: flex-end; }
+    .modal {
+        width: 100%;
+        max-width: none;
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+        border-top-left-radius: 18px;
+        border-top-right-radius: 18px;
+        padding: 22px 18px 28px 18px;
+        transform: translateY(100%);
+    }
+    .modal-overlay.active .modal { transform: translateY(0); }
+    .modal-title { font-size: 17px; margin-bottom: 14px; }
+    .modal-input { font-size: 18px; padding: 14px 16px; }
+    .quick-action-grid { gap: 8px; }
+    .quick-action-chip { flex: 1 1 calc(50% - 8px); text-align: center; min-height: 42px; }
+    .step-action-row { display: grid; grid-template-columns: repeat(4, 1fr); }
+    .step-action-chip { min-width: 0; min-height: 42px; }
+    .modal-actions { flex-direction: column-reverse; }
+    .modal-actions .btn { width: 100%; min-height: 44px; }
     
     /* MOBILE CARD TABLE RE-IMPLEMENTATION (COMPACT HORIZONTAL LIST) */
     .product-table thead { display: none; }
@@ -369,6 +419,7 @@ body {
         grid-row-gap: 2px;
         grid-column-gap: 8px;
         align-items: center;
+        cursor: pointer;
     }
     .product-table td { padding: 0; border: none; display: flex; align-items: center; justify-content: flex-start; text-align: left; }
     .product-table td::before { display: none !important; }

@@ -44,7 +44,7 @@ def main():
     if sys.platform == "darwin":
         command.extend(["--osx-bundle-identifier", "com.sneakerbaker.desktop"])
 
-    command.append(os.path.join(repo_root, "app.py"))
+    command.append(os.path.join(repo_root, "launcher.py"))
 
     print("[*] Running:", " ".join(command))
     subprocess.run(command, cwd=repo_root, check=True)

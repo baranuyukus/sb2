@@ -121,6 +121,7 @@
                 </label>
                 <button class="btn btn-sm btn-success" onclick="bulkAutoEnable()">✅ Auto Aç</button>
                 <button class="btn btn-sm btn-danger" onclick="bulkAutoDisable()">❌ Auto Kapat</button>
+                <button class="btn btn-sm" onclick="openBulkMinPriceModal()">📌 Toplu Min</button>
                 <span class="toolbar-info" id="toolbar-info"></span>
             </div>
         </div>
@@ -247,11 +248,35 @@
             <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Dip Fiyat Limiti (Auto için) (₺)</label>
             <input type="number" class="modal-input" id="modal-min-price-input" placeholder="Örn: 13500 (Opsiyonel)" min="0" style="margin-bottom:0">
             <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Bot, rekabet ederken bu fiyattan aşağıya inmez.</p>
+            <p class="modal-helper-text" id="modal-floor-hint"></p>
+            <div class="quick-action-grid" id="modal-min-quick-actions"></div>
+            <div class="step-action-row" id="modal-min-step-actions"></div>
         </div>
 
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeModal()">İptal</button>
             <button class="btn btn-primary" id="btn-confirm-price" onclick="confirmPriceUpdate()">✓ Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── BULK MIN PRICE MODAL ───────────────────────────────── -->
+<div class="modal-overlay" id="bulk-min-modal">
+    <div class="modal">
+        <div class="modal-title">📌 Toplu Minimum Fiyat</div>
+        <p class="modal-helper-text" id="bulk-min-selection-text">Seçili ürünlere aynı alt limit uygulanacak.</p>
+
+        <div style="margin-bottom: 16px;">
+            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Minimum Fiyat (₺)</label>
+            <input type="number" class="modal-input" id="bulk-min-price-input" placeholder="Örn: 13500" min="0" style="margin-bottom:0">
+            <p class="modal-helper-text">Boş bırakmak yerine `0` girersen seçili ürünlerde limit temizlenir.</p>
+            <div class="quick-action-grid" id="bulk-min-quick-actions"></div>
+            <div class="step-action-row" id="bulk-min-step-actions"></div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeBulkMinPriceModal()">İptal</button>
+            <button class="btn btn-primary" id="btn-confirm-bulk-min" onclick="confirmBulkMinPrice()">✓ Uygula</button>
         </div>
     </div>
 </div>

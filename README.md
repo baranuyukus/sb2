@@ -6,11 +6,19 @@ Bu proje SneakerBaker panelini yerelde Flask ile ayağa kaldırır, `cloudflared
 
 Paketlenmiş uygulama açıldığında:
 
-1. Uygun boş portu bulur.
-2. Yerel dashboard'u başlatır.
-3. Varsayılan tarayıcıda paneli otomatik açar.
-4. `cloudflared` tünelini başlatır.
-5. Tunnel linkini hem loglarda hem de panel içinde gösterir.
+1. Önce masaüstü launcher açılır.
+2. Kullanıcı profil seçer ya da yeni profil oluşturur.
+3. Seçilen profil için uygun boş port bulunur.
+4. Yerel dashboard başlatılır.
+5. Varsayılan tarayıcıda panel otomatik açılır.
+6. `cloudflared` tüneli başlatılır.
+7. Tunnel linki hem loglarda hem de panel içinde gösterilir.
+
+## Profil mantığı
+
+- Her profil kendi state, cookie, min fiyat, ayar ve tunnel runtime alanına sahiptir.
+- Aynı anda birden fazla farklı profil çalıştırılabilir.
+- Aynı profil ikinci kez başlatılmak istenirse mevcut local panel açılır.
 
 ## Kurulumsuz paketler
 
@@ -30,13 +38,13 @@ Bu sayede hedef cihazda ayrıca Python, `cloudflared` ya da Chrome kurulumu gere
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python app.py
+python launcher.py
 ```
 
-İsterseniz otomatik davranışları kapatabilirsiniz:
+Doğrudan dashboard server çalıştırmak isterseniz:
 
 ```bash
-python app.py --no-browser --no-tunnel
+python launcher.py --app-server --profile profile-1 --port 5050 --no-tunnel
 ```
 
 ## Desktop build

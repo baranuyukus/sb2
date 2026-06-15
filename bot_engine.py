@@ -19,21 +19,24 @@ from datetime import datetime
 
 from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
-from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 
 from browser_manager import create_webdriver
-from runtime_env import app_data_path, ensure_app_subdir, resource_path
+from runtime_env import app_data_path, ensure_profile_subdir, profile_path, resource_path
 
 BASE_URL = "https://sneakerbaker.com"
 PRODUCTS_URL = f"{BASE_URL}/sat/urunler"
-DEBUG_DIR = ensure_app_subdir("debug")
 
 
 class BotEngine:
     def __init__(self, profile="default"):
         self.profile = profile
-        self.state_file = app_data_path(f"state_{profile}.json")
-        self.legacy_state_file = resource_path(f"state_{profile}.json")
+        self.state_file = profile_path("state.json", profile_id=profile)
+        self.legacy_state_files = [
+            app_data_path(f"state_{profile}.json"),
+            resource_path(f"state_{profile}.json"),
+        ]
+        self.debug_dir = ensure_profile_subdir("debug", profile_id=profile)
         self.driver = None
         self.session = None
         self.products = []
@@ -74,8 +77,11 @@ class BotEngine:
     def _load_state(self):
         try:
             state_path = self.state_file
-            if not os.path.exists(state_path) and os.path.exists(self.legacy_state_file):
-                state_path = self.legacy_state_file
+            if not os.path.exists(state_path):
+                for legacy_path in self.legacy_state_files:
+                    if os.path.exists(legacy_path):
+                        state_path = legacy_path
+                        break
 
             if os.path.exists(state_path):
                 with open(state_path, "r", encoding="utf-8") as f:
@@ -147,8 +153,8 @@ class BotEngine:
             return False
 
     def open_browser(self):
-        """Chrome tarayıcı aç, giriş sayfasına git"""
-        self.log("🌐 Chrome tarayıcı açılıyor...")
+        """Undetected Chrome tarayıcı aç, giriş sayfasına git"""
+        self.log("🌐 Stealth Chrome tarayıcı açılıyor...")
         self.login_waiting = True
 
         try:
@@ -158,30 +164,29 @@ class BotEngine:
                 except:
                     pass
 
-            chrome_options = Options()
-            profile_root = ensure_app_subdir("chrome-profile", self.profile)
+            chrome_options = uc.ChromeOptions()
+            profile_root = ensure_profile_subdir("chrome-profile", profile_id=self.profile)
             profile_dir = tempfile.mkdtemp(prefix="session-", dir=profile_root)
             chrome_options.add_argument("--start-maximized")
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--no-first-run")
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option("useAutomationExtension", False)
             chrome_options.add_argument("--no-default-browser-check")
             chrome_options.add_argument("--disable-search-engine-choice-screen")
             chrome_options.add_argument(f"--user-data-dir={profile_dir}")
 
+            # undetected-chromedriver tüm stealth işlemlerini otomatik yapar:
+            # - navigator.webdriver = undefined
+            # - ChromeDriver binary patchleme
+            # - Otomasyon bayraklarını kaldırma
+            # - CDP fingerprint temizleme
             self.driver = create_webdriver(chrome_options)
-            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            })
             
             # Timeout ayarları
             self.driver.set_page_load_timeout(30)
             self.driver.implicitly_wait(10)
 
             self.driver.get(f"{BASE_URL}/giris")
-            self.log("✅ Chrome açıldı! Giriş yapmanız bekleniyor...")
+            self.log("✅ Stealth Chrome açıldı! Giriş yapmanız bekleniyor...")
             return True
         except Exception as e:
             self.log(f"❌ Chrome açılamadı: {e}", "error")
@@ -342,8 +347,8 @@ class BotEngine:
                 return [], False
 
             # Debug
-            os.makedirs(DEBUG_DIR, exist_ok=True)
-            with open(os.path.join(DEBUG_DIR, f"page_{page}.html"), "w", encoding="utf-8") as f:
+            os.makedirs(self.debug_dir, exist_ok=True)
+            with open(os.path.join(self.debug_dir, f"page_{page}.html"), "w", encoding="utf-8") as f:
                 f.write(resp.text)
 
         except Exception as e:
@@ -699,6 +704,13 @@ class BotEngine:
     def set_bulk_auto(self, product_ids, enabled):
         for pid in product_ids:
             self.set_product_auto(pid, enabled)
+
+    def set_bulk_min_price(self, product_ids, min_price):
+        updated = 0
+        for pid in product_ids:
+            self.set_product_min_price(pid, min_price)
+            updated += 1
+        return updated
 
     def calculate_undercut(self, product):
         """Bir ürün için undercut fiyatı hesapla"""
