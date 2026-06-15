@@ -154,12 +154,16 @@ def resolve_browser_bundle():
     return None
 
 
-def create_webdriver(chrome_options):
+def create_webdriver(chrome_options, user_data_dir=None):
     bundle = resolve_browser_bundle()
     kwargs = {
         "options": chrome_options,
         "use_subprocess": True,
+        "user_multi_procs": True,
     }
+
+    if user_data_dir:
+        kwargs["user_data_dir"] = user_data_dir
 
     if bundle:
         kwargs["browser_executable_path"] = bundle.chrome_binary

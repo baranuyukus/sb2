@@ -142,7 +142,7 @@ def api_auto_login():
         return jsonify({"success": False, "error": "Email ve şifre zorunludur"}), 400
 
     engine = current_engine()
-    result = engine.auto_login(email, password)
+    result = engine.auto_login(email, password, prefer_saved_cookies=False)
     if result.get("success"):
         engine.save_credentials(email, password)
 

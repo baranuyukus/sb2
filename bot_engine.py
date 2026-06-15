@@ -14,7 +14,6 @@ import re
 import json
 import os
 import platform
-import tempfile
 import threading
 from datetime import datetime
 
@@ -39,6 +38,7 @@ class BotEngine:
             resource_path(f"state_{profile}.json"),
         ]
         self.debug_dir = ensure_profile_subdir("debug", profile_id=profile)
+        self.browser_profile_dir = ensure_profile_subdir("chrome-profile", "browser-data", profile_id=profile)
         self.driver = None
         self.session = None
         self.products = []
@@ -173,10 +173,45 @@ class BotEngine:
         except:
             return False
 
+    def _cleanup_browser_singletons(self):
+        for name in ("SingletonCookie", "SingletonLock", "SingletonSocket"):
+            candidate = os.path.join(self.browser_profile_dir, name)
+            try:
+                if os.path.exists(candidate):
+                    os.remove(candidate)
+            except OSError:
+                pass
+
+    def _clear_browser_auth_state(self):
+        try:
+            self.driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
+        except Exception:
+            pass
+        try:
+            self.driver.execute_cdp_cmd("Network.clearBrowserCache", {})
+        except Exception:
+            pass
+        try:
+            self.driver.delete_all_cookies()
+        except Exception:
+            pass
+        try:
+            self.driver.get(BASE_URL)
+            self.driver.execute_script(
+                """
+                try { localStorage.clear(); } catch (e) {}
+                try { sessionStorage.clear(); } catch (e) {}
+                """
+            )
+        except Exception:
+            pass
+
     def open_browser(self):
         """Undetected Chrome tarayıcı aç, giriş sayfasına git"""
         self.log("🌐 Stealth Chrome tarayıcı açılıyor...")
         self.login_waiting = True
+        self.logged_in = False
+        self.session = None
 
         try:
             if self.driver:
@@ -185,27 +220,28 @@ class BotEngine:
                 except:
                     pass
 
+            self._cleanup_browser_singletons()
             chrome_options = uc.ChromeOptions()
-            profile_root = ensure_profile_subdir("chrome-profile", profile_id=self.profile)
-            profile_dir = tempfile.mkdtemp(prefix="session-", dir=profile_root)
             chrome_options.add_argument("--start-maximized")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--no-first-run")
             chrome_options.add_argument("--no-default-browser-check")
             chrome_options.add_argument("--disable-search-engine-choice-screen")
-            chrome_options.add_argument(f"--user-data-dir={profile_dir}")
+            chrome_options.add_argument("--profile-directory=Default")
+            chrome_options.add_argument(f"--user-data-dir={self.browser_profile_dir}")
 
             # undetected-chromedriver tüm stealth işlemlerini otomatik yapar:
             # - navigator.webdriver = undefined
             # - ChromeDriver binary patchleme
             # - Otomasyon bayraklarını kaldırma
             # - CDP fingerprint temizleme
-            self.driver = create_webdriver(chrome_options)
+            self.driver = create_webdriver(chrome_options, user_data_dir=self.browser_profile_dir)
             
             # Timeout ayarları
             self.driver.set_page_load_timeout(30)
             self.driver.implicitly_wait(10)
 
+            self._clear_browser_auth_state()
             self.driver.get(f"{BASE_URL}/giris")
             self.log("✅ Stealth Chrome açıldı! Giriş yapmanız bekleniyor...")
             return True
@@ -214,9 +250,11 @@ class BotEngine:
             self.login_waiting = False
             return False
 
-    def auto_login(self, email, password):
+    def auto_login(self, email, password, prefer_saved_cookies=True):
         """Kullanıcının emaili ve şifresi ile otomatik giriş yapar"""
         self.log("🤖 Otomatik giriş başlatılıyor...")
+        self.logged_in = False
+        self.session = None
         
         # Tarayıcı açık değilse aç
         if not self.is_driver_alive():
@@ -224,8 +262,9 @@ class BotEngine:
                 return {"success": False, "error": "Tarayıcı açılamadı"}
 
         try:
-            if self.saved_cookies:
+            if prefer_saved_cookies and self.saved_cookies:
                 self.log("🍪 Kayıtlı çerezler (cookieler) bulundu, tarayıcıya ekleniyor...")
+                self._clear_browser_auth_state()
                 self.driver.get(f"{BASE_URL}/404-bypass-login")
                 for cookie in self.saved_cookies:
                     try:
@@ -243,12 +282,15 @@ class BotEngine:
                         return {"success": True}
                 else:
                     self.log("⚠️ Çerezlerin süresi dolmuş, form ile giriş deneniyor...", "warning")
+            else:
+                self._clear_browser_auth_state()
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
             from selenium.webdriver.common.keys import Keys
             
             # /hesabim/ sayfasına git
+            self._clear_browser_auth_state()
             self.driver.get(f"{BASE_URL}/hesabim/")
             
             wait = WebDriverWait(self.driver, 10)
@@ -339,6 +381,8 @@ class BotEngine:
             return True
 
         except Exception as e:
+            self.session = None
+            self.logged_in = False
             self.log(f"❌ Giriş onaylanamadı: {e}", "error")
             self.login_waiting = False
             return False
