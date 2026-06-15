@@ -8,6 +8,7 @@ Thread-safe, Flask API ile entegre çalışır.
 
 import time
 import hashlib
+import math
 import random
 import re
 import json
@@ -41,7 +42,7 @@ class BotEngine:
         self.driver = None
         self.session = None
         self.products = []
-        self.product_settings = {}  # {product_id: {auto: bool, min_price: int}}
+        self.product_settings = {}  # {product_id: {auto: bool, min_price: int, cost: int}}
         self.logs = []
         self.max_logs = 200
 
@@ -87,7 +88,7 @@ class BotEngine:
             if os.path.exists(state_path):
                 with open(state_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                self.product_settings = data.get("product_settings", {})
+                self.product_settings = self._normalize_product_settings(data.get("product_settings", {}))
                 self.undercut_amount = data.get("undercut_amount", 1)
                 self.min_profit_margin = data.get("min_profit_margin", 500)
                 self.bot_interval = data.get("bot_interval", 300)
@@ -99,6 +100,25 @@ class BotEngine:
                 self.log(f"💾 [{self.profile}] Kaydedilmiş ayarlar yüklendi")
         except Exception as e:
             self.log(f"⚠️ State yüklenemedi: {e}")
+
+    def _normalize_product_settings(self, raw_settings):
+        normalized = {}
+        for pid, settings in (raw_settings or {}).items():
+            if not isinstance(settings, dict):
+                continue
+            normalized[str(pid)] = {
+                "auto": bool(settings.get("auto", False)),
+                "min_price": self._coerce_non_negative_int(settings.get("min_price", 0)),
+                "cost": self._coerce_non_negative_int(settings.get("cost", 0)),
+            }
+        return normalized
+
+    def _coerce_non_negative_int(self, value, default=0):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(parsed, 0)
 
     def _save_state(self):
         try:
@@ -384,9 +404,9 @@ class BotEngine:
                 sell_el = card.select_one(".sell[data-current-price]")
                 current_price = int(sell_el.get("data-current-price", "0")) if sell_el else 0
 
-                cost_el = card.select_one(".cost")
-                cost_text = cost_el.get_text(strip=True) if cost_el else "0"
-                cost_price = self._parse_price(cost_text)
+                payout_el = card.select_one(".cost")
+                payout_text = payout_el.get_text(strip=True) if payout_el else "0"
+                payout_price = self._parse_price(payout_text)
 
                 min_el = card.select_one(".minPrice[data-min-fiyat]")
                 min_price = int(min_el.get("data-min-fiyat", "0")) if min_el else 0
@@ -409,12 +429,13 @@ class BotEngine:
                     "image": img_src,
                     "size": size,
                     "current_price": current_price,
-                    "cost_price": cost_price,
-                    "payout_price": cost_price,
+                    "cost_price": payout_price,
+                    "payout_price": payout_price,
                     "min_price": min_price,
                     "competitors": competitors,
                     "auto_enabled": settings.get("auto", False),
                     "auto_min_price": settings.get("min_price", 0),
+                    "manual_cost": settings.get("cost", 0),
                 })
             except Exception as e:
                 continue
@@ -694,6 +715,7 @@ class BotEngine:
         pid = str(product_id)
         if pid not in self.product_settings:
             self.product_settings[pid] = {}
+        min_price = self._coerce_non_negative_int(min_price)
         self.product_settings[pid]["min_price"] = min_price
         with self.lock:
             for p in self.products:
@@ -702,6 +724,23 @@ class BotEngine:
                     break
         self._save_state()
         self.log(f"📌 #{pid} min fiyat: ₺{min_price:,}")
+
+    def set_product_cost(self, product_id, cost):
+        pid = str(product_id)
+        if pid not in self.product_settings:
+            self.product_settings[pid] = {}
+        cost = self._coerce_non_negative_int(cost)
+        self.product_settings[pid]["cost"] = cost
+        with self.lock:
+            for p in self.products:
+                if p["id"] == pid:
+                    p["manual_cost"] = cost
+                    break
+        self._save_state()
+        if cost > 0:
+            self.log(f"🧾 #{pid} maliyet kaydedildi: ₺{cost:,}")
+        else:
+            self.log(f"🧾 #{pid} maliyet temizlendi")
 
     def set_bulk_auto(self, product_ids, enabled):
         for pid in product_ids:
@@ -714,25 +753,61 @@ class BotEngine:
             updated += 1
         return updated
 
+    def estimate_payout(self, product, sale_price):
+        sale_price = self._coerce_non_negative_int(sale_price)
+        current_price = self._coerce_non_negative_int(product.get("current_price", 0))
+        current_payout = self._coerce_non_negative_int(product.get("payout_price") or product.get("cost_price", 0))
+        if not sale_price or not current_price or not current_payout:
+            return 0
+        return round((sale_price * current_payout) / current_price)
+
+    def minimum_sale_price_for_payout(self, product, required_payout):
+        required_payout = self._coerce_non_negative_int(required_payout)
+        current_price = self._coerce_non_negative_int(product.get("current_price", 0))
+        current_payout = self._coerce_non_negative_int(product.get("payout_price") or product.get("cost_price", 0))
+        if not required_payout or not current_price or not current_payout:
+            return 0
+        return math.ceil((required_payout * current_price) / current_payout)
+
     def calculate_undercut(self, product):
         """Bir ürün için undercut fiyatı hesapla"""
         current = product["current_price"]
         min_market = product["min_price"]
-        cost = product["cost_price"]
         auto_min = product.get("auto_min_price", 0)
+        manual_cost = self._coerce_non_negative_int(product.get("manual_cost", 0))
+
+        if min_market <= 0:
+            return None, "Rakip dip fiyatı yok"
 
         if current <= min_market:
             return None, "Zaten en ucuz"
 
         new_price = min_market - self.undercut_amount
-        floor = cost + self.min_profit_margin
+        sale_floor = auto_min if auto_min > 0 else 0
+        block_reasons = []
+
         if auto_min > 0:
-            floor = max(floor, auto_min)
+            block_reasons.append(f"manuel dip ₺{auto_min:,}")
 
-        if new_price < floor:
-            return None, f"Min fiyat engeli (₺{floor:,})"
+        if manual_cost > 0:
+            required_payout = manual_cost + self.min_profit_margin
+            cost_floor = self.minimum_sale_price_for_payout(product, required_payout)
+            if not cost_floor:
+                return None, "Ele kalan hesabı yapılamıyor"
+            sale_floor = max(sale_floor, cost_floor)
+            block_reasons.append(f"maliyet+marj için min satış ₺{cost_floor:,}")
 
-        return new_price, f"₺{current:,} → ₺{new_price:,}"
+        if sale_floor > 0 and new_price < sale_floor:
+            return None, "Koruma engeli: " + " | ".join(block_reasons)
+
+        estimated_payout = self.estimate_payout(product, new_price)
+        if manual_cost > 0 and estimated_payout < (manual_cost + self.min_profit_margin):
+            return None, f"Koruma engeli: ele kalan ₺{estimated_payout:,}"
+
+        details = f"₺{current:,} → ₺{new_price:,}"
+        if estimated_payout > 0:
+            details += f" | ele kalan ≈ ₺{estimated_payout:,}"
+        return new_price, details
 
     def run_auto_cycle(self):
         """

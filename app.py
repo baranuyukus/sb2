@@ -209,6 +209,14 @@ def api_set_min_price(product_id):
     return jsonify({"success": True})
 
 
+@app.route("/api/products/<product_id>/cost", methods=["POST"])
+def api_set_product_cost(product_id):
+    data = request.get_json(silent=True) or {}
+    cost = data.get("cost", 0)
+    current_engine().set_product_cost(product_id, int(cost))
+    return jsonify({"success": True})
+
+
 @app.route("/api/products/bulk-auto", methods=["POST"])
 def api_bulk_auto():
     data = request.get_json(silent=True) or {}

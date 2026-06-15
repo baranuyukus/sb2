@@ -138,6 +138,7 @@
                             <th class="col-size">Beden</th>
                             <th class="col-price">Fiyatın</th>
                             <th class="col-price">Ele Kalan</th>
+                            <th class="col-price">Maliyet</th>
                             <th class="col-price">En Ucuz</th>
                             <th class="col-auto">Auto</th>
                             <th class="col-min">Min Fiyat</th>
@@ -146,7 +147,7 @@
                         </tr>
                     </thead>
                     <tbody id="product-tbody">
-                        <tr><td colspan="11">
+                        <tr><td colspan="12">
                             <div class="empty-state">
                                 <div class="empty-icon">👟</div>
                                 <h3>Henüz ürün yok</h3>
@@ -172,7 +173,7 @@
             <div class="setting-card">
                 <label>Koruma Marjı (₺)</label>
                 <input type="number" id="setting-profit" value="500" min="0">
-                <p style="margin-top:6px;font-size:10px;color:var(--text-muted)">Auto dip fiyat hesabında ele kalan referansına eklenen güvenlik payı</p>
+                <p style="margin-top:6px;font-size:10px;color:var(--text-muted)">Sadece maliyet girilmiş ürünlerde kullanılır. Kural: ele kalan, maliyet + koruma marjının altına inmez.</p>
             </div>
             <div class="setting-card">
                 <label>Bot Aralığı (saniye)</label>
@@ -232,6 +233,10 @@
                 <span style="color:var(--text-dim)">Ele Kalan:</span>
                 <strong id="modal-info-payout"></strong>
             </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
+                <span style="color:var(--text-dim)">Kayıtlı Maliyet:</span>
+                <strong id="modal-info-cost"></strong>
+            </div>
             <div style="display:flex; justify-content:space-between; font-size:12px;">
                 <span style="color:var(--text-dim)">Platformdaki En Ucuz:</span>
                 <strong id="modal-info-cheapest" style="color:var(--accent)"></strong>
@@ -246,9 +251,15 @@
         </div>
 
         <div style="margin-bottom: 20px;">
+            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Ürün Maliyeti (₺, opsiyonel)</label>
+            <input type="number" class="modal-input" id="modal-cost-input" placeholder="Örn: 11250" min="0" style="margin-bottom:8px">
+            <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Maliyet girersen bot, ele kalan değeri maliyet + koruma marjının altına düşürmez.</p>
+        </div>
+
+        <div style="margin-bottom: 20px;">
             <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Dip Fiyat Limiti (Auto için) (₺)</label>
             <input type="number" class="modal-input" id="modal-min-price-input" placeholder="Örn: 13500 (Opsiyonel)" min="0" style="margin-bottom:0">
-            <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Bot, rekabet ederken bu fiyattan aşağıya inmez.</p>
+            <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Maliyet girmediğin ürünlerde ana koruma bu limit olur. Maliyet girilmiş ürünlerde ise ayrıca koruma marjı kuralı da uygulanır.</p>
             <p class="modal-helper-text" id="modal-floor-hint"></p>
             <div class="quick-action-grid" id="modal-min-quick-actions"></div>
             <div class="step-action-row" id="modal-min-step-actions"></div>

@@ -39,7 +39,7 @@ def resolve_port(preferred_port):
 
 def build_launch_command(profile_id, port):
     base = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, os.path.abspath(__file__)]
-    return base + ["--app-server", "--profile", profile_id, "--port", str(port), "--open-browser"]
+    return base + ["--app-server", "--profile", profile_id, "--port", str(port)]
 
 
 def launch_cwd():
@@ -202,7 +202,7 @@ class LauncherWindow:
 
         try:
             self.spawn_locks.add(profile_id)
-            subprocess.Popen(
+            process = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -211,15 +211,59 @@ class LauncherWindow:
             )
             self.status_var.set(f"{profile['name']} başlatılıyor...")
             self.details_var.set(f"Beklenen local panel: http://127.0.0.1:{port}")
-            threading.Thread(target=self._release_spawn_lock, args=(profile_id,), daemon=True).start()
+            threading.Thread(
+                target=self._monitor_profile_start,
+                args=(profile_id, profile["name"], process, port),
+                daemon=True,
+            ).start()
         except Exception as exc:
             self.spawn_locks.discard(profile_id)
             messagebox.showerror("Başlatılamadı", str(exc))
 
-    def _release_spawn_lock(self, profile_id):
-        time.sleep(4)
+    def _monitor_profile_start(self, profile_id, profile_name, process, expected_port):
+        deadline = time.time() + 25
+        runtime = None
+
+        while time.time() < deadline:
+            runtime = self.profile_runtime(profile_id)
+            if runtime and runtime.get("local_url"):
+                self.root.after(0, lambda payload=runtime: self._handle_profile_started(profile_id, profile_name, payload))
+                return
+
+            if process.poll() is not None:
+                self.root.after(0, lambda: self._handle_profile_failed(profile_id, profile_name, expected_port))
+                return
+
+            time.sleep(0.5)
+
+        self.root.after(0, lambda: self._handle_profile_timeout(profile_id, profile_name, expected_port))
+
+    def _handle_profile_started(self, profile_id, profile_name, runtime):
         self.spawn_locks.discard(profile_id)
-        self.root.after(0, self.refresh_profiles)
+        self.refresh_profiles()
+        self.status_var.set(f"{profile_name} hazır.")
+        self.details_var.set(f"Panel açılıyor: {runtime['local_url']}")
+        webbrowser.open(runtime["local_url"])
+
+    def _handle_profile_failed(self, profile_id, profile_name, expected_port):
+        self.spawn_locks.discard(profile_id)
+        self.refresh_profiles()
+        self.status_var.set(f"{profile_name} başlatılamadı.")
+        self.details_var.set(f"Beklenen panel açılamadı: http://127.0.0.1:{expected_port}")
+        messagebox.showwarning("Başlatılamadı", f"{profile_name} açılırken süreç erken kapandı.")
+
+    def _handle_profile_timeout(self, profile_id, profile_name, expected_port):
+        self.spawn_locks.discard(profile_id)
+        self.refresh_profiles()
+        runtime = self.profile_runtime(profile_id)
+        if runtime and runtime.get("local_url"):
+            self.status_var.set(f"{profile_name} geç açıldı.")
+            self.details_var.set(f"Panel açılıyor: {runtime['local_url']}")
+            webbrowser.open(runtime["local_url"])
+            return
+
+        self.status_var.set(f"{profile_name} için panel doğrulanamadı.")
+        self.details_var.set(f"Lütfen local paneli kontrol edin: http://127.0.0.1:{expected_port}")
 
     def create_profile_dialog(self):
         name = simpledialog.askstring("Yeni Profil", "Profil adı:", parent=self.root)
