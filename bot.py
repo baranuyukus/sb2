@@ -17,8 +17,7 @@ from urllib.parse import urljoin
 
 from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 from colorama import Fore, Style, init
 
 init(autoreset=True)
@@ -57,24 +56,19 @@ def print_banner():
 
 
 def open_browser_for_login():
-    """Chrome tarayıcı açar, kullanıcı giriş yapar. Driver açık kalır."""
+    """Stealth Chrome tarayıcı açar, kullanıcı giriş yapar. Driver açık kalır."""
     global driver
 
-    print(f"\n{Fore.YELLOW}[*] Chrome tarayıcı açılıyor...{Style.RESET_ALL}")
+    print(f"\n{Fore.YELLOW}[*] Stealth Chrome tarayıcı açılıyor...{Style.RESET_ALL}")
     print(f"{Fore.CYAN}[i] Lütfen sneakerbaker.com'a giriş yapın.{Style.RESET_ALL}")
     print(f"{Fore.CYAN}[i] Giriş yaptıktan sonra /sat/urunler sayfasına gidin.{Style.RESET_ALL}")
     print(f"{Fore.CYAN}[i] Hazır olduğunuzda terminale dönüp ENTER'a basın.{Style.RESET_ALL}\n")
 
-    chrome_options = Options()
+    chrome_options = uc.ChromeOptions()
     chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option("useAutomationExtension", False)
 
-    driver = webdriver.Chrome(options=chrome_options)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
+    # undetected-chromedriver tüm stealth işlemlerini otomatik yapar
+    driver = uc.Chrome(options=chrome_options, use_subprocess=True)
 
     driver.get(f"{BASE_URL}/giris")
 
@@ -273,7 +267,7 @@ def reconnect_browser():
     global driver
 
     print(f"\n{Fore.RED}[!] Tarayıcı bağlantısı koptu!{Style.RESET_ALL}")
-    print(f"{Fore.YELLOW}[*] Yeni Chrome penceresi açılıyor...{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}[*] Yeni Stealth Chrome penceresi açılıyor...{Style.RESET_ALL}")
     print(f"{Fore.CYAN}[i] Lütfen tekrar giriş yapın ve ENTER'a basın.{Style.RESET_ALL}\n")
 
     # Eski driver'ı temizle
@@ -282,16 +276,10 @@ def reconnect_browser():
     except:
         pass
 
-    chrome_options = Options()
+    chrome_options = uc.ChromeOptions()
     chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option("useAutomationExtension", False)
 
-    driver = webdriver.Chrome(options=chrome_options)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
+    driver = uc.Chrome(options=chrome_options, use_subprocess=True)
 
     driver.get(f"{BASE_URL}/giris")
 
