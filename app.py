@@ -7,7 +7,6 @@ import argparse
 import atexit
 import hashlib
 import os
-import socket
 import threading
 import time
 import urllib.request
@@ -19,6 +18,7 @@ import tunnel_manager
 from bot_engine import BotEngine
 from console_utils import safe_print
 from curl_cffi import requests as cf_requests
+from port_utils import resolve_port
 from profile_store import (
     cleanup_stale_runtime,
     clear_profile_runtime,
@@ -52,18 +52,6 @@ def parse_args(argv=None):
     parser.add_argument("--open-browser", action="store_true", help="Auto-open the dashboard in system browser on startup")
     parser.add_argument("--no-tunnel", action="store_true", help="Do not auto-start the Cloudflare tunnel")
     return parser.parse_args(argv)
-
-
-def resolve_port(preferred_port):
-    port = preferred_port
-    while True:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if sock.connect_ex(("127.0.0.1", port)) != 0:
-                return port
-        port += 1
-
-
 def open_browser_when_ready(url):
     if os.environ.get("SB_DISABLE_BROWSER") == "1":
         return

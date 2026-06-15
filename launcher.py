@@ -2,7 +2,6 @@
 
 import argparse
 import os
-import socket
 import subprocess
 import sys
 import threading
@@ -12,6 +11,7 @@ from tkinter import END, StringVar, Tk
 from tkinter import messagebox, simpledialog, ttk
 
 from app import main as run_dashboard
+from port_utils import is_browser_safe_port, resolve_port
 from profile_store import (
     cleanup_stale_runtime,
     create_profile,
@@ -25,18 +25,6 @@ def parse_launcher_args(argv=None):
     parser = argparse.ArgumentParser(description="SneakerBaker Launcher")
     parser.add_argument("--app-server", action="store_true", help="Run the Flask dashboard server instead of the launcher")
     return parser.parse_known_args(argv)
-
-
-def resolve_port(preferred_port):
-    port = preferred_port
-    while True:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if sock.connect_ex(("127.0.0.1", port)) != 0:
-                return port
-        port += 1
-
-
 def build_launch_command(profile_id, port):
     base = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, os.path.abspath(__file__)]
     return base + ["--app-server", "--profile", profile_id, "--port", str(port)]
@@ -113,6 +101,9 @@ class LauncherWindow:
     def profile_runtime(self, profile_id):
         return cleanup_stale_runtime(profile_id)
 
+    def runtime_has_unsafe_port(self, runtime):
+        return bool(runtime and not is_browser_safe_port(runtime.get("port")))
+
     def selected_profile_id(self):
         selection = self.tree.selection()
         return selection[0] if selection else None
@@ -127,8 +118,14 @@ class LauncherWindow:
         profile = self.profile_rows.get(profile_id)
         runtime = self.profile_runtime(profile_id)
         if runtime:
-            self.status_var.set(f"{profile['name']} şu an çalışıyor.")
-            self.details_var.set(f"Local panel: {runtime.get('local_url')}  |  PID: {runtime.get('pid')}")
+            if self.runtime_has_unsafe_port(runtime):
+                self.status_var.set(f"{profile['name']} güvensiz portta çalışıyor.")
+                self.details_var.set(
+                    f"Port {runtime.get('port')} tarayıcı tarafından bloklanıyor. Bu profili kapatıp yeniden başlatın; güvenli port atanacak."
+                )
+            else:
+                self.status_var.set(f"{profile['name']} şu an çalışıyor.")
+                self.details_var.set(f"Local panel: {runtime.get('local_url')}  |  PID: {runtime.get('pid')}")
         else:
             self.status_var.set(f"{profile['name']} başlatılmaya hazır.")
             self.details_var.set(f"Tercih edilen port: {profile.get('preferred_port', 5050)}  |  Profil id: {profile_id}")
@@ -141,7 +138,7 @@ class LauncherWindow:
         seen = set()
         for profile in profiles:
             runtime = self.profile_runtime(profile["id"])
-            status = "Çalışıyor" if runtime else "Hazır"
+            status = "Güvensiz Port" if self.runtime_has_unsafe_port(runtime) else ("Çalışıyor" if runtime else "Hazır")
             port = runtime.get("port") if runtime else profile.get("preferred_port", "—")
             last_used = profile.get("last_used_at") or "—"
 
@@ -177,6 +174,13 @@ class LauncherWindow:
             messagebox.showinfo("Açık Oturum Yok", "Bu profil şu an çalışmıyor.")
             return
 
+        if not is_browser_safe_port(runtime.get("port")):
+            messagebox.showwarning(
+                "Güvensiz Port",
+                f"Bu oturum {runtime.get('port')} portunda çalışıyor ve tarayıcı bunu blokluyor. Profili yeniden başlatın; güvenli port atanacak.",
+            )
+            return
+
         webbrowser.open(runtime["local_url"])
 
     def start_selected_profile(self):
@@ -191,6 +195,16 @@ class LauncherWindow:
         profile = self.profile_rows[profile_id]
         runtime = self.profile_runtime(profile_id)
         if runtime:
+            if self.runtime_has_unsafe_port(runtime):
+                self.status_var.set(f"{profile['name']} güvensiz portta çalışıyor.")
+                self.details_var.set(
+                    f"Port {runtime.get('port')} bloklu. Profili kapatıp yeniden başlatın; yeni oturum güvenli portla açılacak."
+                )
+                messagebox.showwarning(
+                    "Güvensiz Port",
+                    f"{profile['name']} şu an {runtime.get('port')} portunda çalışıyor. Tarayıcı bunu blokladığı için önce bu oturumu kapatıp sonra yeniden başlatın.",
+                )
+                return
             self.status_var.set(f"{profile['name']} zaten çalışıyor.")
             self.details_var.set(f"Mevcut local panel açılıyor: {runtime['local_url']}")
             webbrowser.open(runtime["local_url"])

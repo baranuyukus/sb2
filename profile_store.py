@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
+from port_utils import DEFAULT_PORT_BASE, next_preferred_port
+
 from runtime_env import (
     app_data_dir,
     app_data_path,
@@ -22,7 +24,6 @@ from runtime_env import (
 REGISTRY_PATH = app_data_path("profiles.json")
 RUNTIME_FILENAME = "runtime.json"
 SEED_PROFILE_NAMES = ["Profil 1", "Profil 2", "Profil 3"]
-DEFAULT_PORT_BASE = 5050
 
 
 def _now_iso():
@@ -175,20 +176,24 @@ def ensure_seed_profiles():
     changed = False
 
     if not registry["profiles"]:
+        assigned_ports = []
         for index, name in enumerate(SEED_PROFILE_NAMES, start=1):
             profile_id = f"profile-{index}"
+            preferred_port = next_preferred_port(assigned_ports)
+            assigned_ports.append(preferred_port)
             registry["profiles"].append(
                 {
                     "id": profile_id,
                     "name": name,
                     "created_at": _now_iso(),
                     "last_used_at": None,
-                    "preferred_port": DEFAULT_PORT_BASE + ((index - 1) * 10),
+                    "preferred_port": preferred_port,
                     "is_seeded": True,
                 }
             )
         changed = True
 
+    assigned_ports = set()
     for profile in registry["profiles"]:
         if "created_at" not in profile:
             profile["created_at"] = _now_iso()
@@ -196,12 +201,25 @@ def ensure_seed_profiles():
         if "last_used_at" not in profile:
             profile["last_used_at"] = None
             changed = True
-        if "preferred_port" not in profile:
-            profile["preferred_port"] = DEFAULT_PORT_BASE
+        preferred_port = profile.get("preferred_port")
+        if not isinstance(preferred_port, int):
+            try:
+                preferred_port = int(preferred_port)
+            except (TypeError, ValueError):
+                preferred_port = None
+
+        if preferred_port is None or preferred_port <= 0 or preferred_port in assigned_ports:
+            profile["preferred_port"] = next_preferred_port(assigned_ports)
             changed = True
+        else:
+            safe_port = next_preferred_port(assigned_ports, start=preferred_port, step=1)
+            if safe_port != preferred_port:
+                profile["preferred_port"] = safe_port
+                changed = True
         if "is_seeded" not in profile:
             profile["is_seeded"] = False
             changed = True
+        assigned_ports.add(profile["preferred_port"])
         _ensure_profile_layout(profile["id"])
 
     registry["profiles"].sort(key=_profile_sort_key)
@@ -244,7 +262,7 @@ def ensure_profile(profile_id, name=None):
         "name": name or profile_id,
         "created_at": _now_iso(),
         "last_used_at": None,
-        "preferred_port": DEFAULT_PORT_BASE,
+        "preferred_port": next_preferred_port([item.get("preferred_port") for item in registry["profiles"]]),
         "is_seeded": False,
     }
     registry["profiles"].append(profile)
@@ -266,7 +284,7 @@ def create_profile(name):
         counter += 1
 
     used_ports = [profile.get("preferred_port", DEFAULT_PORT_BASE) for profile in registry["profiles"]]
-    preferred_port = max(used_ports, default=DEFAULT_PORT_BASE - 10) + 10
+    preferred_port = next_preferred_port(used_ports)
 
     profile = {
         "id": profile_id,
@@ -310,7 +328,7 @@ def record_profile_launch(profile_id, port):
     registry = _load_registry()
     for profile in registry["profiles"]:
         if profile["id"] == profile_id:
-            profile["preferred_port"] = port
+            profile["preferred_port"] = int(port)
             profile["last_used_at"] = _now_iso()
             _save_registry(registry)
             return profile
