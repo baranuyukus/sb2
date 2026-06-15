@@ -17,6 +17,7 @@ from flask import Flask, Response, jsonify, render_template, request
 
 import tunnel_manager
 from bot_engine import BotEngine
+from console_utils import safe_print
 from curl_cffi import requests as cf_requests
 from profile_store import (
     cleanup_stale_runtime,
@@ -78,7 +79,7 @@ def open_browser_when_ready(url):
         try:
             webbrowser.open(url)
         except Exception as exc:
-            print(f"[!] Tarayıcı otomatik açılamadı: {exc}")
+            safe_print(f"[!] Tarayıcı otomatik açılamadı: {exc}")
 
     threading.Thread(target=opener, daemon=True).start()
 
@@ -334,7 +335,7 @@ def main(argv=None):
     args = parse_args(argv)
     existing_runtime = cleanup_stale_runtime(args.profile)
     if existing_runtime:
-        print(f"[!] Profil zaten çalışıyor: {existing_runtime.get('local_url')}")
+        safe_print(f"[!] Profil zaten çalışıyor: {existing_runtime.get('local_url')}")
         return 1
 
     args.port = resolve_port(args.port)
@@ -343,9 +344,9 @@ def main(argv=None):
     bootstrap_app(args.profile, args)
     mark_profile_running(args.profile, args.port, os.getpid(), local_url)
 
-    print("\n🔥 SneakerBaker Bot Dashboard")
-    print(f"👤 Profil: {args.profile} ({current_profile_name()})")
-    print(f"📍 Local: {local_url}\n")
+    safe_print("\n🔥 SneakerBaker Bot Dashboard")
+    safe_print(f"👤 Profil: {args.profile} ({current_profile_name()})")
+    safe_print(f"📍 Local: {local_url}\n")
 
     if not args.no_tunnel:
         tunnel_manager.start_tunnel(args.port)

@@ -48,6 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
             confirmBulkMinPrice();
         }
     });
+
+    el('modal-price-input')?.addEventListener('input', updateModalNetPayoutHint);
 });
 
 // ─── MOBILE SIDEBAR ─────────────────────────────────────────────
@@ -361,6 +363,17 @@ function formatPrice(n) {
     return '₺' + n.toLocaleString('tr-TR');
 }
 
+function getPayoutPrice(product) {
+    return product?.payout_price ?? product?.cost_price ?? 0;
+}
+
+function estimatePayout(product, salePrice) {
+    const currentPrice = parseInt(product?.current_price || 0, 10) || 0;
+    const currentPayout = getPayoutPrice(product);
+    if (!currentPrice || !currentPayout || !salePrice) return 0;
+    return Math.round((salePrice * currentPayout) / currentPrice);
+}
+
 function renderProducts() {
     const tbody = el('product-tbody');
     const filtered = getFilteredProducts();
@@ -407,7 +420,7 @@ function renderProducts() {
             <td data-label="Fiyatın" class="price-cell price-current">
                 <span class="price-editable" onclick="openPriceModal('${p.id}')" title="Tıkla → düzenle">${formatPrice(p.current_price)}</span>
             </td>
-            <td data-label="Maliyet" class="price-cell price-cost">${formatPrice(p.cost_price)}</td>
+            <td data-label="Ele Kalan" class="price-cell price-cost">${formatPrice(getPayoutPrice(p))}</td>
             <td data-label="En Ucuz" class="price-cell price-min">${formatPrice(p.min_price)}</td>
             <td data-label="Auto" style="text-align:center">
                 <label class="toggle">
@@ -504,13 +517,14 @@ function openPriceModal(productId) {
     // Populate info table
     el('modal-info-size').textContent = p.size;
     el('modal-info-current').textContent = formatPrice(p.current_price);
-    el('modal-info-cost').textContent = formatPrice(p.cost_price);
+    el('modal-info-payout').textContent = formatPrice(getPayoutPrice(p));
     el('modal-info-cheapest').textContent = formatPrice(p.min_price);
 
     // Populate inputs
     el('modal-price-input').value = p.current_price;
     el('modal-min-price-input').value = p.auto_min_price || '';
-    el('modal-floor-hint').textContent = `Maliyet + min kâr tabanı: ${formatPrice(p.cost_price + (parseInt(el('setting-profit').value || '0', 10) || 0))}`;
+    el('modal-floor-hint').textContent = `Ele kalan referansı + koruma marjı: ${formatPrice(getPayoutPrice(p) + (parseInt(el('setting-profit').value || '0', 10) || 0))}`;
+    updateModalNetPayoutHint();
 
     // Hint buttons for current price
     const hints = [];
@@ -524,7 +538,7 @@ function openPriceModal(productId) {
     }
     
     el('modal-hints').innerHTML = hints.map(h =>
-        `<button class="btn btn-sm btn-ghost" style="font-size:10px; border:1px solid var(--border)" onclick="el('modal-price-input').value=${h.value}">${h.label}</button>`
+        `<button class="btn btn-sm btn-ghost" style="font-size:10px; border:1px solid var(--border)" onclick="setNumericInputValue('modal-price-input', ${h.value})">${h.label}</button>`
     ).join('');
 
     renderMinPriceActions(p);
@@ -534,12 +548,12 @@ function openPriceModal(productId) {
 }
 
 function renderMinPriceActions(product) {
-    const floor = product.cost_price + (parseInt(el('setting-profit').value || '0', 10) || 0);
+    const floor = getPayoutPrice(product) + (parseInt(el('setting-profit').value || '0', 10) || 0);
     const minActions = [
         { label: 'En Ucuz', value: product.min_price || 0 },
         { label: 'En Ucuz - 1', value: Math.max((product.min_price || 0) - 1, 0) },
         { label: 'En Ucuz - 10', value: Math.max((product.min_price || 0) - 10, 0) },
-        { label: 'Maliyet + Kâr', value: floor },
+        { label: 'Ele Kalan + Marj', value: floor },
         { label: 'Temizle', value: 0 },
     ];
 
@@ -551,6 +565,22 @@ function renderMinPriceActions(product) {
         const label = step > 0 ? `+${step}` : String(step);
         return `<button class="step-action-chip" onclick="adjustNumericInput('modal-min-price-input', ${step})">${label}</button>`;
     }).join('');
+}
+
+function updateModalNetPayoutHint() {
+    const product = products.find(item => item.id === editingProductId);
+    if (!product) return;
+
+    const salePrice = parseInt(el('modal-price-input').value || '0', 10) || 0;
+    const currentPayout = getPayoutPrice(product);
+    const estimated = estimatePayout(product, salePrice);
+
+    if (!salePrice || !currentPayout) {
+        el('modal-net-payout-hint').textContent = 'Komisyon sonrası ele kalan bilgisi hesaplanamıyor.';
+        return;
+    }
+
+    el('modal-net-payout-hint').textContent = `Tahmini ele kalan: ${formatPrice(estimated)}  |  Mevcut ele kalan: ${formatPrice(currentPayout)}`;
 }
 
 function closeModal() {
@@ -683,10 +713,10 @@ function closeBulkMinPriceModal() {
 
 function renderBulkMinQuickActions() {
     const firstSelected = products.find(product => getSelectedIds().includes(product.id));
-    const floor = firstSelected ? firstSelected.cost_price + (parseInt(el('setting-profit').value || '0', 10) || 0) : 0;
+    const floor = firstSelected ? getPayoutPrice(firstSelected) + (parseInt(el('setting-profit').value || '0', 10) || 0) : 0;
     const quickActions = [
         { label: 'Temizle', value: 0 },
-        { label: 'İlk Ürün Maliyet + Kâr', value: floor },
+        { label: 'İlk Ürün Ele Kalan + Marj', value: floor },
     ];
 
     el('bulk-min-quick-actions').innerHTML = quickActions.map(action =>
@@ -895,6 +925,7 @@ function setNumericInputValue(inputId, value) {
     input.value = value || 0;
     input.focus();
     input.select();
+    if (inputId === 'modal-price-input') updateModalNetPayoutHint();
 }
 
 function adjustNumericInput(inputId, delta) {
@@ -903,6 +934,7 @@ function adjustNumericInput(inputId, delta) {
     const current = parseInt(input.value || '0', 10) || 0;
     input.value = Math.max(current + delta, 0);
     input.focus();
+    if (inputId === 'modal-price-input') updateModalNetPayoutHint();
 }
 
 function el(id) { return document.getElementById(id); }

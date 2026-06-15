@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 import undetected_chromedriver as uc
 
 from browser_manager import create_webdriver
+from console_utils import safe_print
 from runtime_env import app_data_path, ensure_profile_subdir, profile_path, resource_path
 
 BASE_URL = "https://sneakerbaker.com"
@@ -127,7 +128,7 @@ class BotEngine:
             self.logs.append(entry)
             if len(self.logs) > self.max_logs:
                 self.logs = self.logs[-self.max_logs:]
-        print(f"[{entry['time']}] [{level.upper()}] {message}")
+        safe_print(f"[{entry['time']}] [{level.upper()}] {message}")
 
     def get_logs(self, since=0):
         with self.lock:
@@ -409,6 +410,7 @@ class BotEngine:
                     "size": size,
                     "current_price": current_price,
                     "cost_price": cost_price,
+                    "payout_price": cost_price,
                     "min_price": min_price,
                     "competitors": competitors,
                     "auto_enabled": settings.get("auto", False),

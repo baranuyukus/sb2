@@ -8,6 +8,7 @@ import threading
 import urllib.request
 from datetime import datetime
 
+from console_utils import safe_print
 from runtime_env import app_data_path, ensure_app_subdir, ensure_profile_subdir, profile_dir, resource_path
 
 
@@ -32,7 +33,7 @@ def _append_log(message, level="info"):
         TUNNEL_LOGS.append(entry)
         if len(TUNNEL_LOGS) > MAX_TUNNEL_LOGS:
             del TUNNEL_LOGS[:-MAX_TUNNEL_LOGS]
-    print(f"[TUNNEL {entry['time']}] [{level.upper()}] {message}")
+    safe_print(f"[TUNNEL {entry['time']}] [{level.upper()}] {message}")
 
 
 def _set_state(status=None, error=None, url=_UNSET, port=None):
