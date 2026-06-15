@@ -37,6 +37,7 @@
         <button class="btn btn-primary" style="width:100%" id="btn-login" onclick="handleLogin()">
             🌐 Giriş Yap
         </button>
+        <div class="sidebar-auth-status" id="sidebar-auth-status">Profil oturumu bekleniyor.</div>
     </div>
 </aside>
 
@@ -64,6 +65,7 @@
             <button class="btn btn-sm btn-danger" id="btn-stop-tunnel" onclick="stopTunnel()">Durdur</button>
         </div>
     </div>
+    <div class="auth-banner" id="auth-banner" hidden></div>
     
     <header class="header">
         <div style="display:flex; align-items:center; gap:12px;">
@@ -216,58 +218,80 @@
 
 <!-- ─── PRICE MODAL ─────────────────────────────────────── -->
 <div class="modal-overlay" id="price-modal">
-    <div class="modal">
-        <div class="modal-title">💰 Fiyat ve Limit Düzenle</div>
-        <p style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px" id="modal-product-name"></p>
-        
-        <div style="background:var(--bg-base); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:16px;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
-                <span style="color:var(--text-dim)">Beden:</span>
-                <strong id="modal-info-size"></strong>
+    <div class="modal price-modal-dialog">
+        <div class="price-modal-body" id="price-modal-body">
+            <div class="price-modal-top">
+                <div class="modal-title">💰 Fiyat ve Limit Düzenle</div>
+                <p class="price-modal-product-name" id="modal-product-name"></p>
+
+                <div class="price-modal-summary-card">
+                    <div class="price-summary-row">
+                        <span>Beden:</span>
+                        <strong id="modal-info-size"></strong>
+                    </div>
+                    <div class="price-summary-row">
+                        <span>Mevcut Fiyatınız:</span>
+                        <strong id="modal-info-current"></strong>
+                    </div>
+                    <div class="price-summary-row">
+                        <span>Ele Kalan:</span>
+                        <strong id="modal-info-payout"></strong>
+                    </div>
+                    <div class="price-summary-row">
+                        <span>Kayıtlı Maliyet:</span>
+                        <strong id="modal-info-cost"></strong>
+                    </div>
+                    <div class="price-summary-row">
+                        <span>Platformdaki En Ucuz:</span>
+                        <strong id="modal-info-cheapest" style="color:var(--accent)"></strong>
+                    </div>
+                </div>
             </div>
-            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
-                <span style="color:var(--text-dim)">Mevcut Fiyatınız:</span>
-                <strong id="modal-info-current"></strong>
+
+            <div class="price-field-group">
+                <label class="price-field-label">Anlık Satış Fiyatını Değiştir (₺)</label>
+                <input type="number" class="modal-input" id="modal-price-input" placeholder="Örn: 14500" min="1000" style="margin-bottom:8px">
+                <p class="modal-helper-text" id="modal-net-payout-hint"></p>
+                <p class="field-group-label">Satış fiyatı önerileri</p>
+                <div class="modal-hint" id="modal-hints" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
             </div>
-            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
-                <span style="color:var(--text-dim)">Ele Kalan:</span>
-                <strong id="modal-info-payout"></strong>
+
+            <div class="price-field-group">
+                <label class="price-field-label">Ürün Maliyeti (₺, opsiyonel)</label>
+                <input type="number" class="modal-input" id="modal-cost-input" placeholder="Örn: 11250" min="0" style="margin-bottom:8px">
+                <p class="modal-helper-text">Maliyet girersen bot, ele kalan değeri maliyet + koruma marjının altına düşürmez.</p>
             </div>
-            <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px;">
-                <span style="color:var(--text-dim)">Kayıtlı Maliyet:</span>
-                <strong id="modal-info-cost"></strong>
-            </div>
-            <div style="display:flex; justify-content:space-between; font-size:12px;">
-                <span style="color:var(--text-dim)">Platformdaki En Ucuz:</span>
-                <strong id="modal-info-cheapest" style="color:var(--accent)"></strong>
+
+            <div class="price-field-group">
+                <label class="price-field-label">Dip Fiyat Limiti (Auto için) (₺)</label>
+                <input type="number" class="modal-input" id="modal-min-price-input" placeholder="Örn: 13500 (Opsiyonel)" min="0" style="margin-bottom:0">
+                <p class="modal-helper-text">Maliyet yoksa ana koruma bu limit olur. Maliyet varsa ayrıca koruma marjı da uygulanır.</p>
+                <p class="modal-helper-text" id="modal-floor-hint"></p>
+                <p class="field-group-label">Dip limit önerileri</p>
+                <div class="quick-action-grid" id="modal-min-quick-actions"></div>
+                <div class="step-action-row" id="modal-min-step-actions"></div>
             </div>
         </div>
 
-        <div style="margin-bottom: 16px;">
-            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Anlık Satış Fiyatını Değiştir (₺)</label>
-            <input type="number" class="modal-input" id="modal-price-input" placeholder="Örn: 14500" min="1000" style="margin-bottom:8px">
-            <p class="modal-helper-text" id="modal-net-payout-hint"></p>
-            <div class="modal-hint" id="modal-hints" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
-        </div>
-
-        <div style="margin-bottom: 20px;">
-            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Ürün Maliyeti (₺, opsiyonel)</label>
-            <input type="number" class="modal-input" id="modal-cost-input" placeholder="Örn: 11250" min="0" style="margin-bottom:8px">
-            <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Maliyet girersen bot, ele kalan değeri maliyet + koruma marjının altına düşürmez.</p>
-        </div>
-
-        <div style="margin-bottom: 20px;">
-            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:6px">Dip Fiyat Limiti (Auto için) (₺)</label>
-            <input type="number" class="modal-input" id="modal-min-price-input" placeholder="Örn: 13500 (Opsiyonel)" min="0" style="margin-bottom:0">
-            <p style="font-size:10px; color:var(--text-faint); margin-top:4px;">Maliyet girmediğin ürünlerde ana koruma bu limit olur. Maliyet girilmiş ürünlerde ise ayrıca koruma marjı kuralı da uygulanır.</p>
-            <p class="modal-helper-text" id="modal-floor-hint"></p>
-            <div class="quick-action-grid" id="modal-min-quick-actions"></div>
-            <div class="step-action-row" id="modal-min-step-actions"></div>
-        </div>
-
-        <div class="modal-actions">
-            <button class="btn btn-ghost" onclick="closeModal()">İptal</button>
-            <button class="btn btn-primary" id="btn-confirm-price" onclick="confirmPriceUpdate()">✓ Kaydet</button>
+        <div class="price-modal-footer">
+            <div class="price-modal-live">
+                <div class="price-live-item">
+                    <span>Yeni satış</span>
+                    <strong id="modal-live-sale">—</strong>
+                </div>
+                <div class="price-live-item">
+                    <span>Tahmini ele kalan</span>
+                    <strong id="modal-live-payout">—</strong>
+                </div>
+                <div class="price-live-item">
+                    <span>Koruma durumu</span>
+                    <strong id="modal-live-protection">Bekleniyor</strong>
+                </div>
+            </div>
+            <div class="modal-actions price-modal-actions">
+                <button class="btn btn-ghost" id="btn-cancel-price" onclick="closeModal()">İptal</button>
+                <button class="btn btn-primary" id="btn-confirm-price" onclick="confirmPriceUpdate()">✓ Kaydet</button>
+            </div>
         </div>
     </div>
 </div>

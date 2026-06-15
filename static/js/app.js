@@ -16,6 +16,9 @@ let pollingTimer = null;
 let searchTimer = null;
 let dataVersion = -1;       // Track server data version for auto-refresh
 let isRefreshing = false;    // Prevent double refresh
+let lastStatus = null;
+let priceModalInitialState = null;
+let priceModalSaving = false;
 
 // ─── INIT ───────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -49,9 +52,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    el('modal-price-input')?.addEventListener('input', updateModalNetPayoutHint);
-    el('modal-cost-input')?.addEventListener('input', updateModalProtectionHint);
-    el('setting-profit')?.addEventListener('input', updateModalProtectionHint);
+    el('modal-price-input')?.addEventListener('input', syncPriceModalState);
+    el('modal-cost-input')?.addEventListener('input', syncPriceModalState);
+    el('modal-min-price-input')?.addEventListener('input', syncPriceModalState);
+    el('setting-profit')?.addEventListener('input', syncPriceModalState);
 });
 
 // ─── MOBILE SIDEBAR ─────────────────────────────────────────────
@@ -103,6 +107,7 @@ function startPolling() {
 
 // ─── STATUS UI ──────────────────────────────────────────────────
 function updateStatusUI(d) {
+    lastStatus = d;
     animateNumber('stat-total', d.total_products || 0);
     animateNumber('stat-auto', d.auto_enabled_count || 0);
     animateNumber('stat-undercut', d.needs_undercut_count || 0);
@@ -112,6 +117,7 @@ function updateStatusUI(d) {
         el('profile-badge').textContent = (d.profile_name || d.profile).toUpperCase();
     }
     updateTunnelUI(d);
+    updateAuthUI(d);
 
     el('stat-lastcheck').textContent = d.last_check || '—';
 
@@ -142,6 +148,72 @@ function updateStatusUI(d) {
     }
 
     if (d.total_products > 0 && products.length === 0) loadProducts();
+}
+
+function authStateText(state) {
+    const labels = {
+        idle: 'Oturum bekleniyor',
+        restoring_session: 'Kayıtlı oturum geri yükleniyor',
+        auto_login_in_progress: 'Otomatik giriş deneniyor',
+        awaiting_manual_verification: 'Manuel doğrulama gerekiyor',
+        authenticated: 'Profil bağlı',
+        authentication_failed: 'Giriş doğrulanamadı',
+    };
+    return labels[state] || 'Profil durumu güncelleniyor';
+}
+
+function authTone(state) {
+    if (state === 'authenticated') return 'var(--success)';
+    if (state === 'awaiting_manual_verification') return 'var(--warning)';
+    if (state === 'authentication_failed') return 'var(--danger)';
+    if (state === 'restoring_session' || state === 'auto_login_in_progress') return 'var(--accent)';
+    return 'var(--text-muted)';
+}
+
+function updateAuthUI(status) {
+    const authState = status.auth_state || (status.logged_in ? 'authenticated' : 'idle');
+    const browserSource = status.browser_source || '';
+    const accountLabel = status.last_authenticated_account_label || '';
+    const authMessage = status.auth_message || '';
+
+    const loginButton = el('btn-login');
+    if (status.logged_in) {
+        loginButton.innerHTML = accountLabel ? `✅ ${accountLabel}` : '✅ Bağlı';
+        loginButton.className = 'btn btn-success';
+    } else if (authState === 'awaiting_manual_verification') {
+        loginButton.innerHTML = '🛠️ Doğrulamayı Tamamla';
+        loginButton.className = 'btn btn-primary';
+    } else {
+        loginButton.innerHTML = '🌐 Giriş Yap';
+        loginButton.className = 'btn btn-primary';
+    }
+    loginButton.style.width = '100%';
+
+    const sidebarStatus = el('sidebar-auth-status');
+    let sidebarText = authStateText(authState);
+    if (status.logged_in) {
+        sidebarText = `${accountLabel || 'Profil oturumu aktif'}${browserSource ? ` · ${browserSource}` : ''}`;
+    } else if (authMessage) {
+        sidebarText = `${authMessage}${browserSource ? ` · ${browserSource}` : ''}`;
+    } else if (browserSource) {
+        sidebarText = `${sidebarText} · ${browserSource}`;
+    }
+    sidebarStatus.textContent = sidebarText;
+    sidebarStatus.dataset.state = authState;
+
+    const banner = el('auth-banner');
+    const showBanner = status.challenge_detected || ['restoring_session', 'auto_login_in_progress', 'awaiting_manual_verification', 'authentication_failed'].includes(authState);
+    if (showBanner) {
+        banner.hidden = false;
+        banner.dataset.state = authState;
+        banner.textContent = authMessage || authStateText(authState);
+    } else {
+        banner.hidden = true;
+        banner.textContent = '';
+        delete banner.dataset.state;
+    }
+
+    syncLoginUiFromStatus(status);
 }
 
 function updateTunnelUI(d) {
@@ -538,7 +610,7 @@ async function setProductCost(productId, value) {
     if (editingProductId === productId) {
         el('modal-cost-input').value = cost || '';
         el('modal-info-cost').textContent = formatPrice(cost);
-        updateModalProtectionHint();
+        syncPriceModalState();
     }
     flashRow(productId, 'updating');
 }
@@ -562,8 +634,6 @@ function openPriceModal(productId) {
     el('modal-price-input').value = p.current_price;
     el('modal-cost-input').value = getManualCost(p) || '';
     el('modal-min-price-input').value = p.auto_min_price || '';
-    updateModalNetPayoutHint();
-    updateModalProtectionHint();
 
     // Hint buttons for current price
     const hints = [];
@@ -581,6 +651,9 @@ function openPriceModal(productId) {
     ).join('');
 
     renderMinPriceActions(p);
+    priceModalInitialState = buildPriceModalSnapshot();
+    priceModalSaving = false;
+    syncPriceModalState();
 
     el('price-modal').classList.add('active');
     setTimeout(() => { el('modal-price-input').focus(); el('modal-price-input').select(); }, 200);
@@ -605,6 +678,73 @@ function renderMinPriceActions(product) {
     }).join('');
 }
 
+function buildPriceModalSnapshot() {
+    return {
+        price: parseInt(el('modal-price-input')?.value || '0', 10) || 0,
+        cost: parseInt(el('modal-cost-input')?.value || '0', 10) || 0,
+        minPrice: parseInt(el('modal-min-price-input')?.value || '0', 10) || 0,
+    };
+}
+
+function samePriceModalSnapshot(left, right) {
+    return Boolean(left && right)
+        && left.price === right.price
+        && left.cost === right.cost
+        && left.minPrice === right.minPrice;
+}
+
+function isPriceModalDirty() {
+    if (!priceModalInitialState) return false;
+    return !samePriceModalSnapshot(buildPriceModalSnapshot(), priceModalInitialState);
+}
+
+function getProtectionState(product, salePrice, manualCost, minPrice) {
+    if (!salePrice) {
+        return { text: 'Bekleniyor', className: 'protection-neutral' };
+    }
+
+    const estimatedPayout = estimatePayout(product, salePrice);
+    if (manualCost > 0) {
+        const threshold = manualCost + getProtectionMargin();
+        if (estimatedPayout >= threshold) {
+            return { text: `Uygun · eşik ${formatPrice(threshold)}`, className: 'protection-ok' };
+        }
+        return { text: `Bloklanır · eşik ${formatPrice(threshold)}`, className: 'protection-block' };
+    }
+
+    if (minPrice > 0) {
+        if (salePrice >= minPrice) {
+            return { text: `Dip limit aktif · ${formatPrice(minPrice)}`, className: 'protection-ok' };
+        }
+        return { text: `Dip limit altı · ${formatPrice(minPrice)}`, className: 'protection-block' };
+    }
+
+    return { text: 'Limit yok', className: 'protection-neutral' };
+}
+
+function updatePriceModalLiveSummary() {
+    const product = products.find(item => item.id === editingProductId);
+    if (!product) return;
+
+    const snapshot = buildPriceModalSnapshot();
+    const estimatedPayout = estimatePayout(product, snapshot.price);
+    const protection = getProtectionState(product, snapshot.price, snapshot.cost, snapshot.minPrice);
+
+    el('modal-live-sale').textContent = formatPrice(snapshot.price);
+    el('modal-live-payout').textContent = formatPrice(estimatedPayout);
+
+    const protectionEl = el('modal-live-protection');
+    protectionEl.textContent = protection.text;
+    protectionEl.className = protection.className;
+
+    const confirmButton = el('btn-confirm-price');
+    confirmButton.disabled = priceModalSaving || !isPriceModalDirty();
+    confirmButton.innerHTML = priceModalSaving ? '⏳ Kaydediliyor...' : '✓ Kaydet';
+
+    const cancelButton = el('btn-cancel-price');
+    cancelButton.disabled = priceModalSaving;
+}
+
 function updateModalNetPayoutHint() {
     const product = products.find(item => item.id === editingProductId);
     if (!product) return;
@@ -615,10 +755,12 @@ function updateModalNetPayoutHint() {
 
     if (!salePrice || !currentPayout) {
         el('modal-net-payout-hint').textContent = 'Komisyon sonrası ele kalan bilgisi hesaplanamıyor.';
+        updatePriceModalLiveSummary();
         return;
     }
 
     el('modal-net-payout-hint').textContent = `Tahmini ele kalan: ${formatPrice(estimated)}  |  Mevcut ele kalan: ${formatPrice(currentPayout)}`;
+    updatePriceModalLiveSummary();
 }
 
 function updateModalProtectionHint() {
@@ -626,47 +768,77 @@ function updateModalProtectionHint() {
     if (!product) return;
 
     const manualCost = parseInt(el('modal-cost-input')?.value || '0', 10) || 0;
+    const salePrice = parseInt(el('modal-price-input')?.value || '0', 10) || 0;
+    const minPrice = parseInt(el('modal-min-price-input')?.value || '0', 10) || 0;
     const margin = getProtectionMargin();
     const hint = el('modal-floor-hint');
 
     if (!manualCost) {
-        hint.textContent = 'Maliyet girilmedi. Bu üründe bot yalnızca dip fiyat limitine kadar iner.';
+        hint.textContent = minPrice
+            ? `Maliyet girilmedi. Auto mod bu üründe dip fiyat limitine kadar (${formatPrice(minPrice)}) kırılabilir.`
+            : 'Maliyet girilmedi. Auto mod için ana koruma yalnızca dip fiyat limitidir.';
+        updatePriceModalLiveSummary();
         return;
     }
 
     const requiredPayout = manualCost + margin;
     const minSale = minimumSalePriceForProtection(product, manualCost);
-    hint.textContent = `Koruma kuralı: ele kalan ≥ ${formatPrice(requiredPayout)} (maliyet ${formatPrice(manualCost)} + marj ${formatPrice(margin)}). Tahmini min satış eşiği: ${formatPrice(minSale)}.`;
+    const estimatedPayout = estimatePayout(product, salePrice);
+    hint.textContent = `Koruma kuralı: ele kalan ≥ ${formatPrice(requiredPayout)}. Şu anki tahmini ele kalan ${formatPrice(estimatedPayout)}. Bu kurala göre tahmini min satış eşiği ${formatPrice(minSale)}.`;
+    updatePriceModalLiveSummary();
 }
 
-function closeModal() {
+function syncPriceModalState() {
+    updateModalNetPayoutHint();
+    updateModalProtectionHint();
+}
+
+function closeModal(force = false) {
+    if (!force && priceModalSaving) return;
+    if (!force && isPriceModalDirty()) {
+        const shouldClose = window.confirm('Kaydedilmemiş değişiklikler var. Kapatırsan bu değişiklikler kaybolacak. Devam edilsin mi?');
+        if (!shouldClose) return;
+    }
     el('price-modal').classList.remove('active');
     editingProductId = null;
+    priceModalInitialState = null;
+    priceModalSaving = false;
+    el('btn-confirm-price').disabled = false;
+    el('btn-confirm-price').innerHTML = '✓ Kaydet';
+    el('btn-cancel-price').disabled = false;
 }
 
 async function confirmPriceUpdate() {
-    if (!editingProductId) return;
+    if (!editingProductId || priceModalSaving) return;
     
     const p = products.find(x => x.id === editingProductId);
     if (!p) return;
 
-    const newPriceStr = el('modal-price-input').value;
-    const newCostStr = el('modal-cost-input').value;
-    const newMinStr = el('modal-min-price-input').value;
-    
-    const newPrice = newPriceStr ? parseInt(newPriceStr) : null;
-    const newCost = newCostStr ? parseInt(newCostStr) : 0;
-    const newMinPrice = newMinStr ? parseInt(newMinStr) : 0;
+    if (!isPriceModalDirty()) {
+        toast('ℹ️ Kaydedilecek bir değişiklik yok', 'info');
+        return;
+    }
+
+    const snapshot = buildPriceModalSnapshot();
+    const newPrice = snapshot.price || null;
+    const newCost = snapshot.cost;
+    const newMinPrice = snapshot.minPrice;
+
+    if (!newPrice || newPrice <= 0) {
+        toast('❌ Geçerli bir satış fiyatı girin', 'error');
+        el('modal-price-input').focus();
+        return;
+    }
 
     const pid = editingProductId;
     const btn = el('btn-confirm-price');
-    btn.classList.add('loading'); btn.disabled = true;
-    
-    closeModal();
+    priceModalSaving = true;
+    btn.classList.add('loading');
+    syncPriceModalState();
+
     toast(`⏳ Kaydediliyor...`, 'info');
     flashRow(pid, 'updating');
 
-    let successMessage = "✅ Güncellendi";
     let failed = false;
 
     // 1. Cost update
@@ -699,13 +871,15 @@ async function confirmPriceUpdate() {
         }
     }
 
-    btn.classList.remove('loading'); btn.disabled = false;
-    btn.innerHTML = '✓ Kaydet';
+    btn.classList.remove('loading');
+    priceModalSaving = false;
+    syncPriceModalState();
 
     if (!failed) {
         toast(`✅ Kaydedildi`, 'success');
         renderAll();
         flashRow(pid, 'update-success');
+        closeModal(true);
     } else {
         toast(`❌ Hata oluştu`, 'error');
         flashRow(pid, 'update-error');
@@ -830,8 +1004,32 @@ async function confirmBulkMinPrice() {
 }
 
 // ─── LOGIN ──────────────────────────────────────────────────────
-function handleLogin() { el('login-modal').classList.add('active'); }
+function handleLogin() {
+    el('login-modal').classList.add('active');
+    syncLoginUiFromStatus(lastStatus);
+}
 function closeLoginModal() { el('login-modal').classList.remove('active'); }
+
+function syncLoginUiFromStatus(status = null) {
+    const currentStatus = status || lastStatus || {};
+    const authState = currentStatus.auth_state || (currentStatus.logged_in ? 'authenticated' : 'idle');
+    const manualFlow = authState === 'awaiting_manual_verification' || (currentStatus.browser_alive && !currentStatus.logged_in);
+    const message = currentStatus.auth_message || 'Botun SneakerBaker\'a giriş yapabilmesi için bilgilerinizi girin.';
+
+    const statusText = el('login-status-text');
+    statusText.textContent = message;
+    statusText.style.color = authTone(authState);
+
+    el('btn-open-chrome').style.display = currentStatus.logged_in ? 'none' : '';
+    el('btn-open-chrome').textContent = manualFlow ? '🌐 Tarayıcıyı Yeniden Aç' : '🛠️ Elle Giriş';
+
+    el('btn-confirm-login').style.display = manualFlow ? '' : 'none';
+    el('btn-confirm-login').disabled = false;
+    el('btn-confirm-login').innerHTML = '✓ Giriş Tamamlandı';
+
+    el('btn-auto-login').style.display = currentStatus.challenge_detected ? 'none' : '';
+    el('btn-auto-login').textContent = authState === 'authentication_failed' ? '🔁 Tekrar Dene' : '🚀 Otomatik Giriş';
+}
 
 async function autoLogin() {
     const email = el('login-email').value.trim();
@@ -854,17 +1052,25 @@ async function autoLogin() {
     
     btn.classList.remove('loading');
     btn.disabled = false;
+
+    if (r.requires_manual_verification) {
+        toast('🛠️ Doğrulama gerekiyor, tarayıcıyı açık bırakıp işlemi tamamlayın', 'info');
+        updateStatusUI(r);
+        syncLoginUiFromStatus(r);
+        return;
+    }
     
     if (r.success) {
         toast('✅ Otomatik giriş başarılı!', 'success');
         closeLoginModal(); 
-        loadStatus();
+        updateStatusUI(r);
         txt.textContent = 'Botun SneakerBaker\'a giriş yapabilmesi için bilgilerinizi girin.';
         txt.style.color = '';
     } else {
         toast('❌ ' + (r.error || 'Giriş yapılamadı'), 'error');
-        txt.textContent = '❌ Giriş hatası: ' + (r.error || 'Bilgileri kontrol edip tekrar deneyin.');
+        txt.textContent = '❌ Giriş hatası: ' + (r.error || r.auth_message || 'Bilgileri kontrol edip tekrar deneyin.');
         txt.style.color = 'var(--danger)';
+        updateStatusUI(r);
     }
 }
 
@@ -874,13 +1080,9 @@ async function openChrome() {
     const r = await api('/api/bot/login', 'POST');
     btn.classList.remove('loading');
     if (r.success) {
-        el('login-status-text').textContent = '✅ Chrome açıldı! Giriş yapıp /sat/urunler sayfasına gidin.';
-        el('login-status-text').style.color = 'var(--success)';
-        btn.style.display = 'none';
-        el('btn-auto-login').style.display = 'none';
-        el('login-email').style.display = 'none';
-        el('login-password').style.display = 'none';
-        el('btn-confirm-login').style.display = '';
+        toast('🌐 Tarayıcı açıldı, doğrulamayı aynı pencerede tamamlayın', 'info');
+        updateStatusUI(r);
+        syncLoginUiFromStatus(r);
     } else {
         toast('❌ Chrome açılamadı', 'error');
         btn.disabled = false;
@@ -894,13 +1096,21 @@ async function confirmLogin() {
     btn.classList.remove('loading');
     if (r.success) {
         toast('✅ Giriş başarılı!', 'success');
-        closeLoginModal(); loadStatus();
-        el('btn-open-chrome').style.display = ''; el('btn-open-chrome').disabled = false; el('btn-open-chrome').innerHTML = '🌐 Tarayıcıyı Aç';
-        el('btn-confirm-login').style.display = 'none'; el('btn-confirm-login').disabled = false; el('btn-confirm-login').innerHTML = '✓ Giriş Tamamlandı';
-        el('login-status-text').textContent = 'Chrome tarayıcı açılacak. SneakerBaker\'a giriş yapın.'; el('login-status-text').style.color = '';
+        closeLoginModal();
+        updateStatusUI(r);
+        el('login-status-text').textContent = 'Chrome tarayıcı açılacak. SneakerBaker\'a giriş yapın.';
+        el('login-status-text').style.color = '';
+    } else if (r.auth_state === 'awaiting_manual_verification' || r.challenge_detected) {
+        toast('🛠️ Doğrulama henüz tamamlanmadı', 'info');
+        updateStatusUI(r);
+        syncLoginUiFromStatus(r);
+        btn.disabled = false;
+        btn.innerHTML = '✓ Giriş Tamamlandı';
     } else {
         toast('❌ Doğrulanamadı', 'error');
-        btn.disabled = false; btn.innerHTML = '✓ Giriş Tamamlandı';
+        btn.disabled = false;
+        btn.innerHTML = '✓ Giriş Tamamlandı';
+        updateStatusUI(r);
     }
 }
 
@@ -933,7 +1143,7 @@ async function loadSettings() {
         el('setting-interval').value = d.bot_interval || 300;
         const sel = el('interval-select');
         for (let o of sel.options) if (o.value === String(d.bot_interval || 300)) { o.selected = true; break; }
-        if (editingProductId) updateModalProtectionHint();
+        if (editingProductId) syncPriceModalState();
     }
 }
 
@@ -947,7 +1157,7 @@ async function saveSettings() {
     toast('✅ Ayarlar kaydedildi', 'success');
     const sel = el('interval-select');
     for (let o of sel.options) if (o.value === String(data.bot_interval)) { o.selected = true; break; }
-    if (editingProductId) updateModalProtectionHint();
+    if (editingProductId) syncPriceModalState();
 }
 
 // ─── LOGS ───────────────────────────────────────────────────────
@@ -995,8 +1205,7 @@ function setNumericInputValue(inputId, value) {
     input.value = value || 0;
     input.focus();
     input.select();
-    if (inputId === 'modal-price-input') updateModalNetPayoutHint();
-    if (inputId === 'modal-cost-input') updateModalProtectionHint();
+    if (['modal-price-input', 'modal-cost-input', 'modal-min-price-input'].includes(inputId)) syncPriceModalState();
 }
 
 function adjustNumericInput(inputId, delta) {
@@ -1005,8 +1214,7 @@ function adjustNumericInput(inputId, delta) {
     const current = parseInt(input.value || '0', 10) || 0;
     input.value = Math.max(current + delta, 0);
     input.focus();
-    if (inputId === 'modal-price-input') updateModalNetPayoutHint();
-    if (inputId === 'modal-cost-input') updateModalProtectionHint();
+    if (['modal-price-input', 'modal-cost-input', 'modal-min-price-input'].includes(inputId)) syncPriceModalState();
 }
 
 function el(id) { return document.getElementById(id); }

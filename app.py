@@ -52,6 +52,8 @@ def parse_args(argv=None):
     parser.add_argument("--open-browser", action="store_true", help="Auto-open the dashboard in system browser on startup")
     parser.add_argument("--no-tunnel", action="store_true", help="Do not auto-start the Cloudflare tunnel")
     return parser.parse_args(argv)
+
+
 def open_browser_when_ready(url):
     if os.environ.get("SB_DISABLE_BROWSER") == "1":
         return
@@ -129,8 +131,9 @@ def api_logs():
 
 @app.route("/api/bot/login", methods=["POST"])
 def api_login():
-    success = current_engine().open_browser()
-    return jsonify({"success": success})
+    engine = current_engine()
+    success = engine.open_browser()
+    return jsonify({"success": success, **engine.get_status()})
 
 
 @app.route("/api/bot/auto-login", methods=["POST"])
@@ -143,16 +146,19 @@ def api_auto_login():
 
     engine = current_engine()
     result = engine.auto_login(email, password, prefer_saved_cookies=False)
-    if result.get("success"):
+    if result.get("success") or result.get("requires_manual_verification"):
         engine.save_credentials(email, password)
 
-    return jsonify(result)
+    payload = engine.get_status()
+    payload.update(result)
+    return jsonify(payload)
 
 
 @app.route("/api/bot/confirm-login", methods=["POST"])
 def api_confirm_login():
-    success = current_engine().confirm_login()
-    return jsonify({"success": success})
+    engine = current_engine()
+    success = engine.confirm_login()
+    return jsonify({"success": success, **engine.get_status()})
 
 
 @app.route("/api/products")

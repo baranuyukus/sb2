@@ -21,7 +21,7 @@ from curl_cffi import requests as cf_requests
 from bs4 import BeautifulSoup
 import undetected_chromedriver as uc
 
-from browser_manager import create_webdriver
+from browser_manager import create_webdriver, resolved_browser_label
 from console_utils import safe_print
 from runtime_env import app_data_path, ensure_profile_subdir, profile_path, resource_path
 
@@ -60,10 +60,18 @@ class BotEngine:
         self.login_email = None
         self.login_password = None
         self.saved_cookies = []
+        self.storage_snapshot = {"local_storage": {}, "session_storage": {}}
 
         # Status
         self.logged_in = False
         self.login_waiting = False
+        self.auth_state = "idle"
+        self.auth_message = ""
+        self.challenge_detected = False
+        self.last_authenticated_account_label = None
+        self.last_auth_at = None
+        self.challenge_last_seen_at = None
+        self.browser_source = resolved_browser_label()
 
         # Data version - increments on every change so frontend can detect updates
         self.data_version = 0
@@ -95,6 +103,13 @@ class BotEngine:
                 self.login_email = data.get("login_email")
                 self.login_password = data.get("login_password")
                 self.saved_cookies = data.get("saved_cookies", [])
+                self.storage_snapshot = data.get("storage_snapshot", {"local_storage": {}, "session_storage": {}})
+                self.auth_state = data.get("auth_state", "idle")
+                self.auth_message = data.get("auth_message", "")
+                self.challenge_detected = data.get("challenge_detected", False)
+                self.last_authenticated_account_label = data.get("last_authenticated_account_label")
+                self.last_auth_at = data.get("last_auth_at")
+                self.challenge_last_seen_at = data.get("challenge_last_seen_at")
                 if state_path != self.state_file:
                     self._save_state()
                 self.log(f"💾 [{self.profile}] Kaydedilmiş ayarlar yüklendi")
@@ -130,6 +145,13 @@ class BotEngine:
                 "login_email": self.login_email,
                 "login_password": self.login_password,
                 "saved_cookies": self.saved_cookies,
+                "storage_snapshot": self.storage_snapshot,
+                "auth_state": self.auth_state,
+                "auth_message": self.auth_message,
+                "challenge_detected": self.challenge_detected,
+                "last_authenticated_account_label": self.last_authenticated_account_label,
+                "last_auth_at": self.last_auth_at,
+                "challenge_last_seen_at": self.challenge_last_seen_at,
             }
             with open(self.state_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -153,6 +175,33 @@ class BotEngine:
     def get_logs(self, since=0):
         with self.lock:
             return self.logs[since:]
+
+    def _now_iso(self):
+        return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    def _set_auth_state(self, state, message="", challenge=False, persist=True):
+        self.auth_state = state
+        self.auth_message = message or ""
+        self.challenge_detected = challenge
+        if challenge:
+            self.challenge_last_seen_at = self._now_iso()
+        if state == "authenticated":
+            self.last_auth_at = self._now_iso()
+        if persist:
+            self._save_state()
+
+    def _manual_verification_result(self, message):
+        self.logged_in = False
+        self.login_waiting = True
+        self.session = None
+        self._set_auth_state("awaiting_manual_verification", message, challenge=True)
+        return {
+            "success": False,
+            "requires_manual_verification": True,
+            "challenge_detected": True,
+            "auth_state": self.auth_state,
+            "auth_message": self.auth_message,
+        }
 
     # ─── SELENIUM / LOGIN ────────────────────────────────────────
 
@@ -206,12 +255,151 @@ class BotEngine:
         except Exception:
             pass
 
+    def _restore_storage_snapshot(self):
+        snapshot = self.storage_snapshot or {}
+        local_storage = snapshot.get("local_storage") or {}
+        session_storage = snapshot.get("session_storage") or {}
+        if not local_storage and not session_storage:
+            return
+        try:
+            self.driver.execute_script(
+                """
+                const payload = arguments[0] || {};
+                const localValues = payload.local_storage || {};
+                const sessionValues = payload.session_storage || {};
+                Object.entries(localValues).forEach(([key, value]) => localStorage.setItem(key, value));
+                Object.entries(sessionValues).forEach(([key, value]) => sessionStorage.setItem(key, value));
+                """,
+                {"local_storage": local_storage, "session_storage": session_storage},
+            )
+        except Exception:
+            pass
+
+    def _capture_storage_snapshot(self):
+        try:
+            snapshot = self.driver.execute_script(
+                """
+                const localValues = {};
+                const sessionValues = {};
+                for (let i = 0; i < localStorage.length; i += 1) {
+                    const key = localStorage.key(i);
+                    localValues[key] = localStorage.getItem(key);
+                }
+                for (let i = 0; i < sessionStorage.length; i += 1) {
+                    const key = sessionStorage.key(i);
+                    sessionValues[key] = sessionStorage.getItem(key);
+                }
+                return { local_storage: localValues, session_storage: sessionValues };
+                """
+            )
+            if isinstance(snapshot, dict):
+                self.storage_snapshot = snapshot
+        except Exception:
+            pass
+
+    def _challenge_markers(self, html):
+        html_lower = (html or "").lower()
+        return [
+            "/cdn-cgi/challenge-platform" in html_lower,
+            "__cf$cv$params" in html_lower,
+            "cf-challenge" in html_lower,
+            "verify you are human" in html_lower,
+            "checking your browser" in html_lower,
+            "cloudflare" in html_lower and "challenge" in html_lower,
+            "turnstile" in html_lower,
+        ]
+
+    def _is_challenge_page(self, html=None, url=None):
+        page_html = html
+        page_url = url
+        if page_html is None and self.driver:
+            try:
+                page_html = self.driver.page_source
+            except Exception:
+                page_html = ""
+        if page_url is None and self.driver:
+            try:
+                page_url = self.driver.current_url
+            except Exception:
+                page_url = ""
+        url_lower = (page_url or "").lower()
+        if any(self._challenge_markers(page_html)):
+            return True
+        return any(token in url_lower for token in ("challenge-platform", "cdn-cgi", "cf-challenge", "turnstile"))
+
+    def _extract_account_label(self):
+        if not self.driver:
+            return None
+
+        try:
+            label = self.driver.execute_script(
+                """
+                const selectors = [
+                    'a[href^="mailto:"]',
+                    'input[type="email"]',
+                    '[data-email]',
+                    '.profile-email',
+                    '.account-email',
+                    '.user-email'
+                ];
+                for (const selector of selectors) {
+                    const node = document.querySelector(selector);
+                    if (!node) continue;
+                    const raw = node.value || node.getAttribute('data-email') || node.textContent || node.href || '';
+                    const match = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);
+                    if (match) return match[0];
+                }
+                const bodyText = document.body ? document.body.innerText : '';
+                const bodyMatch = bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);
+                return bodyMatch ? bodyMatch[0] : null;
+                """
+            )
+            if label:
+                return str(label).strip().lower()
+        except Exception:
+            pass
+        return None
+
+    def _resolve_account_label(self, expected_email=None):
+        label = self._extract_account_label()
+        if label:
+            return label
+
+        try:
+            current_url = self.driver.current_url
+            self.driver.get(f"{BASE_URL}/sat/profil")
+            time.sleep(2)
+            label = self._extract_account_label()
+            if current_url:
+                self.driver.get(current_url)
+                time.sleep(1)
+            if label:
+                return label
+        except Exception:
+            pass
+
+        return (expected_email or self.login_email or self.last_authenticated_account_label or "").strip().lower() or None
+
+    def _account_matches(self, account_label, expected_email=None):
+        if not account_label:
+            return True
+        expected_values = [
+            (expected_email or "").strip().lower(),
+            (self.last_authenticated_account_label or "").strip().lower(),
+        ]
+        expected_values = [value for value in expected_values if value]
+        if not expected_values:
+            return True
+        return account_label in expected_values
+
     def open_browser(self):
         """Undetected Chrome tarayıcı aç, giriş sayfasına git"""
         self.log("🌐 Stealth Chrome tarayıcı açılıyor...")
         self.login_waiting = True
         self.logged_in = False
         self.session = None
+        self.browser_source = resolved_browser_label()
+        self._set_auth_state("awaiting_manual_verification", "Tarayıcı açılıyor, giriş hazırlığı yapılıyor...", persist=False)
 
         try:
             if self.driver:
@@ -227,6 +415,8 @@ class BotEngine:
             chrome_options.add_argument("--no-first-run")
             chrome_options.add_argument("--no-default-browser-check")
             chrome_options.add_argument("--disable-search-engine-choice-screen")
+            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options.add_argument("--lang=tr-TR")
             chrome_options.add_argument("--profile-directory=Default")
             chrome_options.add_argument(f"--user-data-dir={self.browser_profile_dir}")
 
@@ -236,18 +426,33 @@ class BotEngine:
             # - Otomasyon bayraklarını kaldırma
             # - CDP fingerprint temizleme
             self.driver = create_webdriver(chrome_options, user_data_dir=self.browser_profile_dir)
+            self.browser_source = getattr(self.driver, "sb_browser_label", self.browser_source)
             
             # Timeout ayarları
             self.driver.set_page_load_timeout(30)
             self.driver.implicitly_wait(10)
 
             self._clear_browser_auth_state()
+            self.driver.get(BASE_URL)
+            self._restore_storage_snapshot()
             self.driver.get(f"{BASE_URL}/giris")
+            if self._is_challenge_page():
+                self._set_auth_state(
+                    "awaiting_manual_verification",
+                    "Cloudflare doğrulaması gerekiyor. Aynı tarayıcı penceresinde doğrulamayı tamamlayın.",
+                    challenge=True,
+                )
+            else:
+                self._set_auth_state(
+                    "awaiting_manual_verification",
+                    f"{self.browser_source} açıldı. Gerekirse giriş veya doğrulamayı bu pencerede tamamlayın.",
+                )
             self.log("✅ Stealth Chrome açıldı! Giriş yapmanız bekleniyor...")
             return True
         except Exception as e:
             self.log(f"❌ Chrome açılamadı: {e}", "error")
             self.login_waiting = False
+            self._set_auth_state("authentication_failed", f"Tarayıcı açılamadı: {e}")
             return False
 
     def auto_login(self, email, password, prefer_saved_cookies=True):
@@ -255,6 +460,7 @@ class BotEngine:
         self.log("🤖 Otomatik giriş başlatılıyor...")
         self.logged_in = False
         self.session = None
+        self._set_auth_state("auto_login_in_progress", "Otomatik giriş deneniyor...", persist=False)
         
         # Tarayıcı açık değilse aç
         if not self.is_driver_alive():
@@ -263,6 +469,7 @@ class BotEngine:
 
         try:
             if prefer_saved_cookies and self.saved_cookies:
+                self._set_auth_state("restoring_session", "Kayıtlı oturum geri yükleniyor...", persist=False)
                 self.log("🍪 Kayıtlı çerezler (cookieler) bulundu, tarayıcıya ekleniyor...")
                 self._clear_browser_auth_state()
                 self.driver.get(f"{BASE_URL}/404-bypass-login")
@@ -276,9 +483,11 @@ class BotEngine:
                 # Doğrula
                 self.driver.get(f"{BASE_URL}/sat/urunler")
                 time.sleep(2)
+                if self._is_challenge_page():
+                    return self._manual_verification_result("Kayıtlı oturum Cloudflare doğrulamasına takıldı. Doğrulamayı tarayıcıda tamamlayın.")
                 if "giris" not in self.driver.current_url.lower() and "login" not in self.driver.current_url.lower():
                     self.log("✅ Çerezler geçerli, şifre girmeden anında giriş yapıldı!")
-                    if self.confirm_login():
+                    if self.confirm_login(expected_email=email):
                         return {"success": True}
                 else:
                     self.log("⚠️ Çerezlerin süresi dolmuş, form ile giriş deneniyor...", "warning")
@@ -319,14 +528,17 @@ class BotEngine:
             # Girişin başarılı olmasını bekle (URL'nin değişmesi veya sayfanın yüklenmesi)
             self.log("⏳ Giriş yapılması bekleniyor...")
             time.sleep(5) # Basit bir bekleme
+            if self._is_challenge_page():
+                return self._manual_verification_result("Cloudflare doğrulaması gerekiyor. Açılan tarayıcıda doğrulamayı ve gerekirse girişi tamamlayın.")
             
             # confirm_login çağırarak cookie'leri yakala
-            if self.confirm_login():
+            if self.confirm_login(expected_email=email):
                 return {"success": True}
             else:
                 return {"success": False, "error": "Giriş yapılamadı, bilgilerinizi kontrol edin"}
                 
         except Exception as e:
+            self._set_auth_state("authentication_failed", f"Otomatik giriş hatası: {e}")
             self.log(f"❌ Otomatik giriş hatası: {e}", "error")
             return {"success": False, "error": str(e)}
 
@@ -335,11 +547,12 @@ class BotEngine:
         self.login_password = password
         self._save_state()
 
-    def confirm_login(self):
+    def confirm_login(self, expected_email=None):
         """Kullanıcı giriş yaptığını onayladıktan sonra cookie'leri yakala"""
         if not self.is_driver_alive():
             self.log("❌ Chrome tarayıcı bulunamadı", "error")
             self.login_waiting = False
+            self._set_auth_state("authentication_failed", "Tarayıcı bağlantısı bulunamadı")
             return False
 
         try:
@@ -348,6 +561,17 @@ class BotEngine:
             if "/sat/urunler" not in current:
                 self.driver.get(f"{BASE_URL}/sat/urunler")
                 time.sleep(3)
+
+            if self._is_challenge_page():
+                self.login_waiting = True
+                self.logged_in = False
+                self.session = None
+                self._set_auth_state(
+                    "awaiting_manual_verification",
+                    "Cloudflare doğrulaması hâlâ aktif. Tarayıcıda doğrulamayı tamamlayıp tekrar deneyin.",
+                    challenge=True,
+                )
+                return False
 
             # Cookie'leri yakala
             selenium_cookies = self.driver.get_cookies()
@@ -373,16 +597,37 @@ class BotEngine:
             for name, value in cookies.items():
                 self.session.cookies.set(name, value, domain="sneakerbaker.com")
 
+            account_label = self._resolve_account_label(expected_email=expected_email)
+            if not self._account_matches(account_label, expected_email=expected_email):
+                self.logged_in = False
+                self.login_waiting = False
+                self.session = None
+                self.saved_cookies = []
+                self.storage_snapshot = {"local_storage": {}, "session_storage": {}}
+                self._set_auth_state(
+                    "authentication_failed",
+                    f"Beklenen hesap yerine farklı bir hesap bulundu: {account_label or 'bilinmiyor'}",
+                )
+                return False
+
+            self._capture_storage_snapshot()
             self.saved_cookies = selenium_cookies
+            if account_label:
+                self.last_authenticated_account_label = account_label
             self._save_state()
             self.logged_in = True
             self.login_waiting = False
+            self._set_auth_state(
+                "authenticated",
+                f"Bağlı hesap: {self.last_authenticated_account_label or expected_email or 'tanımsız'}",
+            )
             self.log(f"✅ Giriş başarılı! {len(cookies)} cookie yakalandı ve kaydedildi [Profil: {self.profile}]")
             return True
 
         except Exception as e:
             self.session = None
             self.logged_in = False
+            self._set_auth_state("authentication_failed", f"Giriş onaylanamadı: {e}")
             self.log(f"❌ Giriş onaylanamadı: {e}", "error")
             self.login_waiting = False
             return False
@@ -409,6 +654,15 @@ class BotEngine:
         try:
             resp = self.session.get(url, headers=headers, timeout=30)
             if resp.status_code != 200:
+                return [], False
+            if self._is_challenge_page(html=resp.text, url=getattr(resp, "url", url)):
+                self.logged_in = False
+                self.session = None
+                self._set_auth_state(
+                    "awaiting_manual_verification",
+                    "Ürünler sayfasında Cloudflare doğrulaması algılandı. Aynı profil için tarayıcıda doğrulamayı tamamlayın.",
+                    challenge=True,
+                )
                 return [], False
 
             # Debug
@@ -498,6 +752,7 @@ class BotEngine:
         """Tüm ürünleri çek"""
         if not self.session:
             self.log("⚠️ Önce giriş yapmalısınız", "warning")
+            self._set_auth_state("authentication_failed", "Geçerli HTTP oturumu bulunamadı")
             return []
 
         self.log("📦 Ürünler çekiliyor...")
@@ -642,6 +897,14 @@ class BotEngine:
                 self.driver.refresh()
 
             time.sleep(random.uniform(2.0, 3.5))
+
+            if self._is_challenge_page():
+                self._set_auth_state(
+                    "awaiting_manual_verification",
+                    "Otomasyon sırasında Cloudflare doğrulaması algılandı. Tarayıcıda doğrulamayı tamamlayın.",
+                    challenge=True,
+                )
+                return False
 
             if not self._wait_for_antibot(timeout=15):
                 self.log("⚠️ SB_ANTIBOT yüklenemedi", "warning")
@@ -915,7 +1178,12 @@ class BotEngine:
         
         while self.bot_running:
             # Otomatik giriş kontrolü
-            if not self.logged_in and self.login_email and self.login_password:
+            if (
+                not self.logged_in
+                and self.login_email
+                and self.login_password
+                and self.auth_state != "awaiting_manual_verification"
+            ):
                 self.log("🤖 Kayıtlı bilgilerle otomatik giriş deneniyor...")
                 self.auto_login(self.login_email, self.login_password)
                 
@@ -970,6 +1238,7 @@ class BotEngine:
             "logged_in": self.logged_in,
             "login_waiting": self.login_waiting,
             "browser_alive": self.is_driver_alive(),
+            "browser_source": self.browser_source,
             "bot_running": self.bot_running,
             "bot_interval": self.bot_interval,
             "last_check": self.last_check_time,
@@ -979,6 +1248,11 @@ class BotEngine:
             "undercut_amount": self.undercut_amount,
             "min_profit_margin": self.min_profit_margin,
             "data_version": self.data_version,
+            "auth_state": self.auth_state,
+            "auth_message": self.auth_message,
+            "challenge_detected": self.challenge_detected,
+            "last_authenticated_account_label": self.last_authenticated_account_label,
+            "last_auth_at": self.last_auth_at,
         }
 
     def update_settings(self, undercut=None, min_profit=None, interval=None):
