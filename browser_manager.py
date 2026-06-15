@@ -4,6 +4,8 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options as SeleniumChromeOptions
 import undetected_chromedriver as uc
 
 from runtime_env import resource_path
@@ -166,7 +168,34 @@ def create_webdriver(chrome_options, user_data_dir=None):
         kwargs["user_data_dir"] = user_data_dir
 
     if bundle:
+        chrome_options.binary_location = bundle.chrome_binary
         kwargs["browser_executable_path"] = bundle.chrome_binary
         kwargs["driver_executable_path"] = bundle.driver_binary
 
-    return uc.Chrome(**kwargs)
+    try:
+        return uc.Chrome(**kwargs)
+    except Exception as primary_exc:
+        # uc bazen bundled Chrome ile yanlış driver major'ına gidebiliyor.
+        # Bu durumda Selenium Manager, browser binary üzerinden doğru sürücüyü eşleştirebiliyor.
+        try:
+            fallback_options = SeleniumChromeOptions()
+            for arg in getattr(chrome_options, "arguments", []):
+                fallback_options.add_argument(arg)
+            if bundle:
+                fallback_options.binary_location = bundle.chrome_binary
+
+            driver = webdriver.Chrome(options=fallback_options)
+            try:
+                driver.execute_cdp_cmd(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {
+                        "source": """
+                            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        """
+                    },
+                )
+            except Exception:
+                pass
+            return driver
+        except Exception as fallback_exc:
+            raise RuntimeError(f"uc başarısız: {primary_exc}; selenium fallback başarısız: {fallback_exc}") from fallback_exc
