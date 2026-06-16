@@ -203,6 +203,65 @@ class BotEngine:
             "auth_message": self.auth_message,
         }
 
+    def _compact_exception_message(self, exc):
+        raw = str(exc or "").strip()
+        if not raw:
+            return "Bilinmeyen tarayıcı hatası"
+
+        first_line = raw.splitlines()[0].strip()
+        lowered = raw.lower()
+
+        if "stacktrace" in lowered:
+            first_line = raw.split("Stacktrace:", 1)[0].strip() or first_line
+        if "message:" in first_line.lower():
+            first_line = first_line.split(":", 1)[-1].strip() or first_line
+
+        mappings = [
+            ("invalid session id", "Tarayıcı oturumu koptu"),
+            ("session deleted", "Tarayıcı oturumu kapandı"),
+            ("disconnected", "Tarayıcı bağlantısı koptu"),
+            ("target window already closed", "Tarayıcı penceresi kapandı"),
+            ("no such window", "Tarayıcı penceresi bulunamadı"),
+            ("web view not found", "Tarayıcı sekmesi yeniden başlatıldı"),
+            ("tab crashed", "Tarayıcı sekmesi çöktü"),
+            ("chrome not reachable", "Chrome bağlantısı kesildi"),
+            ("gethandleverifier", "Tarayıcı oturumu koptu"),
+        ]
+        for needle, replacement in mappings:
+            if needle in lowered:
+                return replacement
+
+        if first_line.lower() in {"message:", "message"}:
+            return "Tarayıcı oturumu beklenmedik şekilde koptu"
+
+        return first_line[:220]
+
+    def _should_fallback_to_manual_verification(self, exc):
+        lowered = str(exc or "").lower()
+        signals = [
+            "invalid session id",
+            "session deleted",
+            "disconnected",
+            "target window already closed",
+            "no such window",
+            "web view not found",
+            "tab crashed",
+            "chrome not reachable",
+            "timed out receiving message from renderer",
+            "unable to receive message from renderer",
+            "timeout: timed out receiving message from renderer",
+            "gethandleverifier",
+        ]
+        return any(signal in lowered for signal in signals)
+
+    def _recover_manual_browser(self):
+        if self.is_driver_alive():
+            return True
+        try:
+            return self.open_browser()
+        except Exception:
+            return False
+
     # ─── SELENIUM / LOGIN ────────────────────────────────────────
 
     def _sec_ch_ua_platform(self):
@@ -528,6 +587,16 @@ class BotEngine:
             # Girişin başarılı olmasını bekle (URL'nin değişmesi veya sayfanın yüklenmesi)
             self.log("⏳ Giriş yapılması bekleniyor...")
             time.sleep(5) # Basit bir bekleme
+            if not self.is_driver_alive():
+                if self._recover_manual_browser():
+                    return self._manual_verification_result(
+                        "Otomatik giriş sırasında tarayıcı oturumu koptu. Cloudflare doğrulamasını ve gerekirse girişi açılan pencerede elle tamamlayın."
+                    )
+                self._set_auth_state(
+                    "authentication_failed",
+                    "Tarayıcı oturumu koptu. 'Tarayıcıyı Yeniden Aç' ile manuel devam edin.",
+                )
+                return {"success": False, "error": "Tarayıcı oturumu koptu"}
             if self._is_challenge_page():
                 return self._manual_verification_result("Cloudflare doğrulaması gerekiyor. Açılan tarayıcıda doğrulamayı ve gerekirse girişi tamamlayın.")
             
@@ -538,9 +607,28 @@ class BotEngine:
                 return {"success": False, "error": "Giriş yapılamadı, bilgilerinizi kontrol edin"}
                 
         except Exception as e:
-            self._set_auth_state("authentication_failed", f"Otomatik giriş hatası: {e}")
-            self.log(f"❌ Otomatik giriş hatası: {e}", "error")
-            return {"success": False, "error": str(e)}
+            compact = self._compact_exception_message(e)
+            if self._should_fallback_to_manual_verification(e):
+                if self._recover_manual_browser():
+                    self.log(f"⚠️ Otomatik giriş manuel doğrulamaya düştü: {compact}", "warning")
+                    return self._manual_verification_result(
+                        "Cloudflare sırasında tarayıcı bağlantısı koptu. Tarayıcı yeniden hazırlandı; doğrulamayı ve gerekirse girişi elle tamamlayın."
+                    )
+                self._set_auth_state(
+                    "authentication_failed",
+                    "Cloudflare sırasında tarayıcı bağlantısı koptu. 'Tarayıcıyı Yeniden Aç' ile manuel devam edin.",
+                )
+                self.log(f"❌ Otomatik girişte tarayıcı koptu: {compact}", "error")
+                return {
+                    "success": False,
+                    "error": "Tarayıcı bağlantısı koptu",
+                    "auth_state": self.auth_state,
+                    "auth_message": self.auth_message,
+                }
+
+            self._set_auth_state("authentication_failed", f"Otomatik giriş durdu: {compact}")
+            self.log(f"❌ Otomatik giriş hatası: {compact}", "error")
+            return {"success": False, "error": compact}
 
     def save_credentials(self, email, password):
         self.login_email = email
@@ -627,8 +715,17 @@ class BotEngine:
         except Exception as e:
             self.session = None
             self.logged_in = False
-            self._set_auth_state("authentication_failed", f"Giriş onaylanamadı: {e}")
-            self.log(f"❌ Giriş onaylanamadı: {e}", "error")
+            compact = self._compact_exception_message(e)
+            if self._should_fallback_to_manual_verification(e):
+                self._set_auth_state(
+                    "awaiting_manual_verification",
+                    "Tarayıcı bağlantısı doğrulama sırasında koptu. 'Tarayıcıyı Yeniden Aç' ile aynı profil üzerinde tekrar deneyin.",
+                    challenge=True,
+                )
+                self.log(f"⚠️ Giriş onayı manuel akışa düştü: {compact}", "warning")
+            else:
+                self._set_auth_state("authentication_failed", f"Giriş onaylanamadı: {compact}")
+                self.log(f"❌ Giriş onaylanamadı: {compact}", "error")
             self.login_waiting = False
             return False
 

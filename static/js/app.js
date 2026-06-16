@@ -162,6 +162,25 @@ function authStateText(state) {
     return labels[state] || 'Profil durumu güncelleniyor';
 }
 
+function sanitizeLoginMessage(message, fallback = '') {
+    const raw = String(message || '').trim();
+    if (!raw) return fallback;
+
+    let cleaned = raw.replace(/\s*Stacktrace:[\s\S]*$/i, '').trim();
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+    const mappings = [
+        [/invalid session id|session deleted|disconnected|chrome not reachable|web view not found|target window already closed|no such window|gethandleverifier/i, 'Tarayıcı oturumu koptu. Manuel doğrulama ile devam et.'],
+        [/cloudflare/i, 'Cloudflare doğrulaması gerekiyor. Aynı profil tarayıcısında doğrulamayı tamamlayıp tekrar dene.'],
+    ];
+
+    for (const [pattern, replacement] of mappings) {
+        if (pattern.test(raw)) return replacement;
+    }
+
+    return cleaned || fallback;
+}
+
 function authTone(state) {
     if (state === 'authenticated') return 'var(--success)';
     if (state === 'awaiting_manual_verification') return 'var(--warning)';
@@ -174,7 +193,7 @@ function updateAuthUI(status) {
     const authState = status.auth_state || (status.logged_in ? 'authenticated' : 'idle');
     const browserSource = status.browser_source || '';
     const accountLabel = status.last_authenticated_account_label || '';
-    const authMessage = status.auth_message || '';
+    const authMessage = sanitizeLoginMessage(status.auth_message, '');
 
     const loginButton = el('btn-login');
     if (status.logged_in) {
@@ -1014,7 +1033,10 @@ function syncLoginUiFromStatus(status = null) {
     const currentStatus = status || lastStatus || {};
     const authState = currentStatus.auth_state || (currentStatus.logged_in ? 'authenticated' : 'idle');
     const manualFlow = authState === 'awaiting_manual_verification' || (currentStatus.browser_alive && !currentStatus.logged_in);
-    const message = currentStatus.auth_message || 'Botun SneakerBaker\'a giriş yapabilmesi için bilgilerinizi girin.';
+    const message = sanitizeLoginMessage(
+        currentStatus.auth_message,
+        'Botun SneakerBaker\'a giriş yapabilmesi için bilgilerinizi girin.'
+    );
 
     const statusText = el('login-status-text');
     statusText.textContent = message;
@@ -1067,8 +1089,9 @@ async function autoLogin() {
         txt.textContent = 'Botun SneakerBaker\'a giriş yapabilmesi için bilgilerinizi girin.';
         txt.style.color = '';
     } else {
-        toast('❌ ' + (r.error || 'Giriş yapılamadı'), 'error');
-        txt.textContent = '❌ Giriş hatası: ' + (r.error || r.auth_message || 'Bilgileri kontrol edip tekrar deneyin.');
+        const friendlyError = sanitizeLoginMessage(r.error || r.auth_message, 'Bilgileri kontrol edip tekrar deneyin.');
+        toast('❌ ' + friendlyError, 'error');
+        txt.textContent = '❌ Giriş hatası: ' + friendlyError;
         txt.style.color = 'var(--danger)';
         updateStatusUI(r);
     }
